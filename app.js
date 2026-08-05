@@ -221,6 +221,7 @@
     g.bankroll = after;
     g.history.push({
       n: roundNo() /* pushed below, so this is still the current round */,
+      input: state.settings.input, // how the bet was placed — decides the ledger's Bet cell
       adv: round.advanced,
       b: round.b,
       p: round.p,
@@ -653,6 +654,30 @@
     return m;
   }
 
+  // A continuous bet has no menu to show — its Bet cell is the slider in
+  // miniature: a grey line, your bet as a blue dot, and (with coaching or on
+  // the results page) a green dot at the optimal fraction and a red one at
+  // break-even. Domain is 0–100% of that round's bankroll, like the slider.
+  function betLine(e, coaching) {
+    const at = (f) => Math.min(100, Math.max(0, f * 100)).toFixed(1) + "%";
+    let dots = "";
+    if (coaching) {
+      dots +=
+        '<span class="bl-dot opt" style="left:' +
+        at(Math.max(e.kelly, 0)) +
+        '"></span>';
+      const x0 = breakEvenX(e.b, e.p, e.q, e.kelly);
+      if (x0 !== null)
+        dots += '<span class="bl-dot x0" style="left:' + at(x0) + '"></span>';
+    }
+    // the bet last, so it sits on top when positions coincide
+    dots +=
+      '<span class="bl-dot bet" style="left:' +
+      at(e.before > 0 ? e.bet / e.before : 0) +
+      '"></span>';
+    return '<span class="bet-line">' + dots + "</span>";
+  }
+
   function ledgerRow(e, coaching) {
     const opts = rowOpts(e);
     const selected = e.bet > 0 ? e.bet : 0;
@@ -669,8 +694,12 @@
     // no native title attributes here — the row's hover tooltip carries the
     // odds, probabilities, and the growth curve, and the two would collide
     let chips = "";
-    for (const a of opts) chips += chip(money(a), clsFor(a));
-    chips += chip("pass", clsFor(0));
+    if (e.input === "slider") {
+      chips = betLine(e, coaching);
+    } else {
+      for (const a of opts) chips += chip(money(a), clsFor(a));
+      chips += chip("pass", clsFor(0));
+    }
 
     // expected return per $1 staked — a push hands the stake back, so the
     // binary form covers ternary rounds too. Negative edges read red: the
@@ -808,19 +837,6 @@
       addBet(0, "no bet");
     } else {
       syncSlider();
-      // with coaching, the track carries the round's answer: a green dot at
-      // the optimal fraction (0 = pass on no-edge rounds) and a red one at
-      // break-even. Positions compensate for the 22px thumb's travel.
-      const coach = state.settings.reveal;
-      const place = (id, f, show) => {
-        const el = $(id);
-        el.classList.toggle("hidden", !show);
-        if (show)
-          el.style.left = "calc(" + f * 100 + "% - " + (f - 0.5) * 22 + "px)";
-      };
-      const x0 = coach ? breakEvenX(r.b, r.p, r.q, r.kelly) : null;
-      place("slider-opt", Math.max(r.kelly, 0), coach);
-      place("slider-x0", x0 === null ? 0 : x0, coach && x0 !== null);
     }
     renderGameLedger();
   }

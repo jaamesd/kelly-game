@@ -255,24 +255,10 @@
   button.small { padding: 6px 12px; min-height: 32px; }
 
   /* ---------- slider ---------- */
-  /* the bet slider reads like the tooltip plot: a grey line, your bet in
-     blue, and (with coaching) a green dot at optimal + a red one at
-     break-even, absolutely positioned over the track */
-  .slider-wrap { position: relative; margin-bottom: 14px; }
-  .slider-dot {
-    position: absolute;
-    top: 50%;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-  }
-  .slider-dot.opt { background: var(--good); }
-  .slider-dot.x0 { background: var(--bad); }
   input[type="range"] {
     display: block;
     width: 100%;
+    margin-bottom: 14px;
     appearance: none;
     -webkit-appearance: none;
     height: 28px;
@@ -283,7 +269,7 @@
   input[type="range"]::-webkit-slider-runnable-track {
     height: 4px;
     border-radius: 2px;
-    background: linear-gradient(to right, var(--accent) var(--fill), var(--grid) var(--fill));
+    background: linear-gradient(to right, var(--muted) var(--fill), var(--grid) var(--fill));
   }
   input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
@@ -291,20 +277,20 @@
     height: 22px;
     margin-top: -9px;
     border-radius: 50%;
-    background: var(--accent);
+    background: var(--ink);
     border: 3px solid var(--page);
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
   }
   input[type="range"]::-moz-range-track {
     height: 4px;
     border-radius: 2px;
-    background: linear-gradient(to right, var(--accent) var(--fill), var(--grid) var(--fill));
+    background: linear-gradient(to right, var(--muted) var(--fill), var(--grid) var(--fill));
   }
   input[type="range"]::-moz-range-thumb {
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background: var(--accent);
+    background: var(--ink);
     border: 3px solid var(--page);
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
   }
@@ -625,6 +611,38 @@
     box-shadow: 0 0 0 1.5px var(--page), 0 0 0 3px var(--accent);
   }
   .chip .mult { opacity: 0.65; font-size: 10px; }
+  /* continuous bets: the slider in miniature instead of a chip menu.
+     Grey line, blue dot = the bet; coaching adds green (optimal) and red
+     (break-even) dots. Domain 0–100% of that round's bankroll. */
+  .bet-line {
+    position: relative;
+    display: inline-block;
+    vertical-align: middle;
+    width: min(86%, 240px);
+    height: 20px;
+  }
+  .bet-line::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 2px;
+    margin-top: -1px;
+    border-radius: 1px;
+    background: var(--grid);
+  }
+  .bl-dot {
+    position: absolute;
+    top: 50%;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+  }
+  .bl-dot.opt { background: var(--good); }
+  .bl-dot.x0 { background: var(--bad); }
+  .bl-dot.bet { background: var(--accent); box-shadow: 0 0 0 1.5px var(--page); }
   /* below this width the ledgers reflow to fit — nothing scrolls sideways */
   @media (max-width: 680px) {
     #ledger-game, #history-table { min-width: 0; font-size: 11px; }
@@ -809,11 +827,7 @@
       </div>
 
       <div id="slider-controls" class="hidden">
-        <div class="slider-wrap">
-          <input type="range" id="bips-slider" min="0" max="10000" step="1" value="0" aria-label="Bet size in basis points">
-          <span class="slider-dot opt hidden" id="slider-opt"></span>
-          <span class="slider-dot x0 hidden" id="slider-x0"></span>
-        </div>
+        <input type="range" id="bips-slider" min="0" max="10000" step="1" value="0" aria-label="Bet size in basis points">
         <button id="slider-bet" class="confirm">
           <span class="confirm-vals"><span id="slider-amount">$0</span><span id="bips-pct">0.00%</span></span>
           <span>Confirm</span>
