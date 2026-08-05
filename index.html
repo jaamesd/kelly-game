@@ -36,6 +36,9 @@
     --good: #006300;
     --bad: #d03b3b;
     --wash: rgba(20, 96, 184, 0.08);
+    /* resting fill on the betting controls — enough to read as a surface
+       without competing with --wash, which belongs to hover */
+    --fill: rgba(11, 11, 11, 0.035);
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -51,6 +54,7 @@
       --accent: #3c7fd0;
       --good: #0ca30c;
       --wash: rgba(60, 127, 208, 0.12);
+      --fill: rgba(255, 255, 255, 0.055);
     }
   }
   * { box-sizing: border-box; }
@@ -77,10 +81,8 @@
     color: var(--muted);
   }
   .rule { border: 0; border-top: 1px solid var(--hairline); margin: 22px 0; }
-  .section-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
-  .head-actions { display: flex; gap: 2px; }
-  .head-actions .ghost { color: var(--muted); }
-  .head-actions .ghost:hover { color: var(--ink); }
+  .section-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 2px; }
+  .head-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 
   .masthead { display: flex; align-items: baseline; gap: 14px; }
   .brand {
@@ -193,7 +195,7 @@
     padding: 9px 16px;
     min-height: 40px;
     cursor: pointer;
-    transition: border-color 0.12s, background 0.12s, transform 0.05s;
+    transition: border-color 0.12s, background 0.12s, color 0.12s, transform 0.05s;
   }
   button:hover { border-color: var(--accent); background: var(--wash); }
   button:active { transform: scale(0.98); }
@@ -217,12 +219,37 @@
   }
   button.bet .amt { display: block; font-family: var(--font-display); font-size: 25px; font-weight: 700; line-height: 1; }
   button.bet .frac { display: block; font-family: var(--font-mono); font-size: 10.5px; font-weight: 400; color: var(--muted); margin-top: 5px; text-transform: none; letter-spacing: 0; }
+  /* the betting controls carry a resting fill — on touch there is no hover to
+     reveal them, so they have to read as pressable standing still. Declared
+     after button:hover, which is why hover is re-asserted below it. */
+  button.bet, button.confirm {
+    background: var(--fill);
+    border-color: var(--hairline);
+  }
+  button.bet:hover, button.confirm:hover {
+    background: var(--wash);
+    border-color: var(--accent);
+  }
+  /* colored actions share one grammar: outline at rest, solid on hover.
+     primary is the accent family; danger is the red family (End game). */
   button.primary {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  button.primary:hover {
     background: var(--accent);
     border-color: var(--accent);
     color: var(--accent-ink);
   }
-  button.primary:hover { background: var(--accent); filter: brightness(1.08); }
+  button.danger {
+    border-color: var(--bad);
+    color: var(--bad);
+  }
+  button.danger:hover {
+    background: var(--bad);
+    border-color: var(--bad);
+    color: #ffffff;
+  }
   button.ghost { color: var(--ink-2); }
   button.ghost:hover { border-color: var(--hairline); background: transparent; color: var(--ink); }
   button.small { padding: 6px 12px; min-height: 32px; }
@@ -317,7 +344,7 @@
     padding: 0 4px;
     line-height: 1.5;
   }
-  button.primary kbd { color: var(--accent-ink); border-color: rgba(255, 255, 255, 0.4); }
+  button.primary:hover kbd { color: var(--accent-ink); border-color: rgba(255, 255, 255, 0.4); }
 
   /* ---------- outcome pop ---------- */
   /* the result lands big, mid-screen, then rises away */
@@ -469,13 +496,29 @@
     border: 1px solid var(--hairline);
     border-radius: 8px;
     box-shadow: 0 3px 14px rgba(0, 0, 0, 0.14);
-    padding: 6px 10px;
+    padding: 7px 10px;
     font-family: var(--font-mono);
     font-size: 12px;
+    line-height: 1.45;
     display: none;
-    z-index: 10;
+    z-index: 20;
+    max-width: min(280px, calc(100vw - 24px));
+  }
+  /* a heading line, then one line per fact — each unwrapped, the block itself
+     free to be as tall as it needs */
+  #tooltip .tip-t {
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink);
     white-space: nowrap;
   }
+  #tooltip .tip-r { color: var(--ink-2); white-space: nowrap; }
+  #tooltip .dim { color: var(--muted); }
+  #tooltip .up { color: var(--good); }
+  #tooltip .dn { color: var(--bad); }
 
   /* slim, quiet scrollbars on every scroll container */
   .table-scroll, .ledger-scroll, .chart-scroll, .modal-card {
@@ -520,6 +563,10 @@
   td.win { color: var(--good); font-weight: 500; }
   td.lose { color: var(--bad); }
   td.dim { color: var(--muted); }
+  /* the last row has nothing below it to be divided from — and in the game
+     view its rule would land right on top of the section's <hr> */
+  #ledger-game tbody tr:last-child td,
+  #history-table tbody tr:last-child td { border-bottom: 0; }
 
   /* ---------- ledger chips ---------- */
   .ledger-scroll { overflow-x: auto; margin-top: 10px; }
@@ -686,8 +733,10 @@
     .settings { row-gap: 16px; }
     .setting { grid-template-columns: 1fr; row-gap: 5px; }
     .radio-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; }
-    .section-head { flex-direction: column; align-items: flex-start; gap: 6px; }
-    .section-head .head-actions { width: 100%; justify-content: space-between; }
+    /* only the radio-row heads need a line of their own — a row of actions
+       fits beside its heading even at 320px, so it stays there */
+    .section-head:has(.radio-row) { flex-direction: column; align-items: flex-start; gap: 6px; }
+    .section-head:has(.radio-row) .radio-row { width: 100%; }
     .probs { font-size: 18px; }
     .choices { display: grid; grid-template-columns: 1fr 1fr; }
     #choice-buttons { grid-template-columns: 1fr 1fr; }
@@ -749,8 +798,7 @@
       <div class="section-head">
         <h2>History</h2>
         <span class="head-actions">
-          <button class="ghost small" id="end-now">End game</button>
-          <button class="ghost small" id="restart">New game</button>
+          <button class="danger small" id="end-now">End game</button>
         </span>
       </div>
       <div class="ledger-scroll">
@@ -869,7 +917,7 @@
         <span class="head-actions">
           <span id="copy-status"></span>
           <button class="primary small hidden" id="extend">Continue</button>
-          <button class="ghost small" id="play-again">New game</button>
+          <button class="primary small" id="play-again">New game</button>
         </span>
       </div>
       <div class="table-scroll">

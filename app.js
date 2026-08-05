@@ -325,6 +325,15 @@
     pop.classList.add("animate");
   }
 
+  // once the pop has played, remove it entirely — a lingering .animate would
+  // replay the animation whenever the board is hidden and shown again
+  // (toggling the info page, ending a game)
+  $("bankroll-pop").addEventListener("animationend", () => {
+    const pop = $("bankroll-pop");
+    pop.className = "";
+    pop.textContent = "";
+  });
+
   /* ---------- ledger (shared by game view and results) ---------- */
 
   function chip(label, cls, title) {
@@ -445,6 +454,8 @@
 
     $("bankroll-num").textContent = money(g.bankroll);
     $("mode-tag").textContent = tierName(roundMode(roundNo()));
+    // the sole header action — inert until there is a game to end
+    $("end-now").disabled = g.history.length === 0;
 
     // advanced notice sticks around for a few rounds after it first triggers
     $("advanced-notice").classList.toggle(
@@ -675,10 +686,44 @@
 
   let mcMode = "chosen";
   let mc = null;
+  const MC_CAP = 100000;
 
   function mcToken() {
     const g = state.game;
     return g.history.length + ":" + g.bankroll + ":" + (g.endReason || "");
+  }
+
+  // The axis is computed, not observed: each round's log-return is a discrete
+  // random variable, so the sum's mean and variance are exact. μ ± 3.5σ covers
+  // the distribution from the first sample — the chart never rescales.
+  function mcRange(rounds, key, ev, user) {
+    let mu = 0;
+    let varSum = 0;
+    for (const r of rounds) {
+      const f = Math.min(key === "chosen" ? r.fc : r.fo, 0.999);
+      if (f <= 0) continue;
+      const up = Math.log1p(f * r.b);
+      const down = Math.log1p(-f);
+      const m = r.p * up + r.q * down;
+      mu += m;
+      varSum += Math.max(0, r.p * up * up + r.q * down * down - m * m);
+    }
+    const mid = (Math.log(START_BANKROLL) + mu) / Math.LN10;
+    const half = (3.5 * Math.sqrt(varSum)) / Math.LN10;
+    let l0 = mid - half;
+    let l1 = mid + half;
+    // the axis must always contain the EV line, your result, and the buy-in
+    for (const v of [ev, user, START_BANKROLL]) {
+      if (v >= 1) {
+        l0 = Math.min(l0, Math.log10(v));
+        l1 = Math.max(l1, Math.log10(v));
+      }
+    }
+    // snap out to whole decades so every tick is a power of ten
+    l0 = Math.max(0, Math.floor(l0));
+    l1 = Math.max(l0 + 1, Math.ceil(l1));
+    const perDecade = Math.max(3, Math.min(12, Math.round(72 / (l1 - l0))));
+    return { l0, l1, NB: (l1 - l0) * perDecade };
   }
 
   function mcSetup() {
@@ -700,20 +745,28 @@
         v *= 1 + (key === "chosen" ? r.fc : r.fo) * (r.p * r.b - r.q);
       ev[key] = v;
     }
-    mc = {
-      token,
-      rounds,
-      acc: { chosen: [], optimal: [] },
-      min: { chosen: Infinity, optimal: Infinity },
-      max: { chosen: 0, optimal: 0 },
-      ev,
-      timer: 0,
-    };
+    const user = state.game.bankroll;
+    mc = { token, rounds, user, ev, acc: {}, built: {}, timer: 0 };
+    // samples are bucketed as they are generated and never retained —
+    // rendering stays O(buckets) no matter how many replays have run
+    for (const key of ["chosen", "optimal"]) {
+      const range = mcRange(rounds, key, ev[key], user);
+      mc.acc[key] = {
+        n: 0,
+        busts: 0,
+        behind: 0, // replays that finished strictly below your result
+        buckets: new Int32Array(range.NB),
+        l0: range.l0,
+        l1: range.l1,
+        NB: range.NB,
+      };
+    }
   }
 
-  function mcBatch(n) {
-    const arr = mc.acc[mcMode];
-    for (let s = 0; s < n; s++) {
+  function mcBatch(count) {
+    const a = mc.acc[mcMode];
+    const scale = a.NB / (a.l1 - a.l0);
+    for (let s = 0; s < count; s++) {
       let bank = START_BANKROLL;
       for (const r of mc.rounds) {
         const f = mcMode === "chosen" ? r.fc : r.fo;
@@ -727,11 +780,16 @@
           }
         }
       }
-      arr.push(bank);
-      if (bank >= 1) {
-        mc.min[mcMode] = Math.min(mc.min[mcMode], bank);
-        mc.max[mcMode] = Math.max(mc.max[mcMode], bank);
+      a.n++;
+      if (bank < mc.user) a.behind++;
+      if (bank < 1) {
+        a.busts++;
+        continue;
       }
+      let i = Math.floor((Math.log10(bank) - a.l0) * scale);
+      if (i < 0) i = 0;
+      else if (i >= a.NB) i = a.NB - 1;
+      a.buckets[i]++;
     }
   }
 
@@ -740,10 +798,11 @@
       if (mc) mc.timer = 0;
       return;
     }
-    const arr = mc.acc[mcMode];
-    if (arr.length < 200000) {
-      mcBatch(arr.length < 2000 ? 400 : 2000);
-      renderMC();
+    const a = mc.acc[mcMode];
+    if (a.n < MC_CAP) {
+      mcBatch(a.n < 2000 ? 400 : 2000);
+      // keep simulating through a scroll, but don't compete with it for frames
+      if (!scrollBusy) renderMC();
       mc.timer = setTimeout(mcTick, 120);
     } else {
       mc.timer = 0;
@@ -754,21 +813,33 @@
   function mcEnsure() {
     mcSetup();
     renderMC();
-    if (!mc.timer) mc.timer = setTimeout(mcTick, 30);
+    if (!mc.timer && mc.acc[mcMode].n < MC_CAP)
+      mc.timer = setTimeout(mcTick, 30);
   }
 
-  function renderMC() {
+  // scroll guard: a passive listener flips a flag while the page is moving
+  let scrollBusy = false;
+  let scrollIdleTimer = 0;
+  window.addEventListener(
+    "scroll",
+    () => {
+      scrollBusy = true;
+      clearTimeout(scrollIdleTimer);
+      scrollIdleTimer = setTimeout(() => {
+        scrollBusy = false;
+      }, 120);
+    },
+    { passive: true, capture: true },
+  );
+
+  // Build the SVG once per (mode, width): the axis is frozen, so the ticks,
+  // markers, and hit targets never change — each tick only mutates bar heights.
+  function mcBuild() {
     const container = $("mc-container");
-    container.textContent = "";
-    const note = $("mc-note");
-    if (!mc) return;
-    const arr = mc.acc[mcMode];
-    if (!arr.length) {
-      note.textContent = "simulating…";
-      return;
-    }
-    const user = state.game.bankroll;
-    const ev = mc.ev[mcMode];
+    const key = mcMode;
+    const a = mc.acc[key];
+    const user = mc.user;
+    const ev = mc.ev[key];
 
     const avail = Math.max(280, container.clientWidth || 694);
     const padL = 12,
@@ -781,37 +852,10 @@
     const baseY = padT + plotH;
     const bustW = 26; // reserved lane on the left for busts
 
-    // log-dollar range covering samples, the EV line, and the user's result
-    let lo = Math.max(
-      1,
-      Math.min(mc.min[mcMode], ev, user >= 1 ? user : Infinity),
-    );
-    let hi = Math.max(mc.max[mcMode], ev, user, START_BANKROLL);
-    let l0 = Math.log10(lo) - 0.05,
-      l1 = Math.log10(hi) + 0.05;
-    if (l1 - l0 < 0.4) {
-      const mid = (l0 + l1) / 2;
-      l0 = mid - 0.2;
-      l1 = mid + 0.2;
-    }
     const x0 = padL + bustW + 10,
       x1 = width - padR;
     const X = (v) =>
-      x0 + ((Math.log10(Math.max(v, 1)) - l0) / (l1 - l0)) * (x1 - x0);
-
-    const NB = 72;
-    const buckets = new Array(NB).fill(0);
-    let busts = 0;
-    for (const v of arr) {
-      if (v < 1) {
-        busts++;
-        continue;
-      }
-      let i = Math.floor(((Math.log10(v) - l0) / (l1 - l0)) * NB);
-      i = Math.max(0, Math.min(NB - 1, i));
-      buckets[i]++;
-    }
-    const maxCount = Math.max(1, ...buckets, busts);
+      x0 + ((Math.log10(Math.max(v, 1)) - a.l0) / (a.l1 - a.l0)) * (x1 - x0);
 
     const svg = svgEl("svg", {
       width,
@@ -822,7 +866,8 @@
     });
     svg.style.display = "block";
 
-    // baseline + power-of-ten ticks
+    // baseline + power-of-ten ticks — the range is whole decades, so every
+    // tick lands exactly and the labels never move
     svgEl(
       "line",
       {
@@ -835,7 +880,13 @@
       },
       svg,
     );
-    for (let d = Math.ceil(l0); d <= Math.floor(l1); d++) {
+    // wide ranges get more decades than the width has room to label —
+    // every decade keeps its tick, labels thin out to a collision-free stride
+    const labelStride = Math.max(
+      1,
+      Math.ceil(((a.l1 - a.l0 + 1) * 42) / (x1 - x0)),
+    );
+    for (let d = a.l0; d <= a.l1; d++) {
       const x = X(Math.pow(10, d));
       svgEl(
         "line",
@@ -849,12 +900,14 @@
         },
         svg,
       );
+      if ((d - a.l0) % labelStride) continue;
       const t = svgEl(
         "text",
         {
           x,
           y: baseY + 16,
-          "text-anchor": "middle",
+          // the outermost label would clip at the svg edge — anchor it inward
+          "text-anchor": x > width - 24 ? "end" : "middle",
           "font-size": 10.5,
           fill: "var(--muted)",
         },
@@ -863,21 +916,22 @@
       t.textContent = money(Math.pow(10, d));
     }
 
-    const barW = (x1 - x0) / NB;
-    for (let i = 0; i < NB; i++) {
-      if (!buckets[i]) continue;
-      const h = Math.max(1.5, (buckets[i] / maxCount) * plotH);
-      svgEl(
-        "rect",
-        {
-          x: x0 + i * barW,
-          y: baseY - h,
-          width: Math.max(barW - 0.5, 0.8),
-          height: h,
-          fill: "var(--accent)",
-          opacity: 0.85,
-        },
-        svg,
+    const barW = (x1 - x0) / a.NB;
+    const bars = [];
+    for (let i = 0; i < a.NB; i++) {
+      bars.push(
+        svgEl(
+          "rect",
+          {
+            x: x0 + i * barW,
+            y: baseY,
+            width: Math.max(barW - 0.5, 0.8),
+            height: 0,
+            fill: "var(--accent)",
+            opacity: 0.85,
+          },
+          svg,
+        ),
       );
     }
     // the bust lane ($0) is always on the axis, even when nothing landed there
@@ -893,23 +947,24 @@
       svg,
     );
     zeroT.textContent = "$0";
-    if (busts) {
-      const h = Math.max(1.5, (busts / maxCount) * plotH);
-      svgEl(
-        "rect",
-        {
-          x: padL,
-          y: baseY - h,
-          width: bustW - 8,
-          height: h,
-          fill: "var(--bad)",
-          opacity: 0.85,
-        },
-        svg,
-      );
-    }
+    const bustBar = svgEl(
+      "rect",
+      {
+        x: padL,
+        y: baseY,
+        width: bustW - 8,
+        height: 0,
+        fill: "var(--bad)",
+        opacity: 0.85,
+      },
+      svg,
+    );
 
-    const vline = (v, color, label) => {
+    const betsName = key === "chosen" ? "your own bets" : "exact Kelly bets";
+    // when the two marker lines run close, their labels split outward
+    // instead of overprinting each other
+    const close = user >= 1 && Math.abs(X(ev) - X(user)) < 30;
+    const vline = (v, color, label, anchor, tip) => {
       const x = X(v);
       svgEl(
         "line",
@@ -926,32 +981,215 @@
       const t = svgEl(
         "text",
         {
-          x,
+          x: x + (anchor === "start" ? 3 : anchor === "end" ? -3 : 0),
           y: padT - 12,
-          "text-anchor": "middle",
+          "text-anchor": anchor,
           "font-size": 10.5,
           fill: color,
         },
         svg,
       );
       t.textContent = label;
+      const hit = svgEl(
+        "rect",
+        {
+          x: x - 7,
+          y: padT - 20,
+          width: 14,
+          height: plotH + 20,
+          fill: "transparent",
+        },
+        svg,
+      );
+      bindTip(hit, tip);
     };
-    vline(ev, "var(--muted)", "EV");
-    if (user >= 1) vline(user, "var(--ink)", "you");
-    container.appendChild(svg);
+    const evSide = close ? (X(ev) >= X(user) ? "start" : "end") : "middle";
+    const youSide = close ? (X(ev) >= X(user) ? "end" : "start") : "middle";
+    vline(ev, "var(--muted)", "EV", evSide, () =>
+      tipHtml("Serial EV " + money(ev), [
+        "each round's expected return, compounded",
+      ]),
+    );
+    if (user >= 1)
+      vline(user, "var(--ink)", "you", youSide, () => {
+        const acc = mc.acc[key];
+        return tipHtml("You — " + money(user), [
+          acc.n
+            ? "ahead of " +
+              Math.round((acc.behind / acc.n) * 100) +
+              "% of replays"
+            : "simulating…",
+        ]);
+      });
 
-    const below = arr.reduce((n, v) => n + (v <= user ? 1 : 0), 0);
+    // hover/tap layer: one full-height target per bucket, reading live counts
+    const bLo = (i) => Math.pow(10, a.l0 + (i / a.NB) * (a.l1 - a.l0));
+    for (let i = 0; i < a.NB; i++) {
+      const hit = svgEl(
+        "rect",
+        {
+          x: x0 + i * barW,
+          y: padT,
+          width: barW,
+          height: plotH,
+          fill: "transparent",
+        },
+        svg,
+      );
+      bindTip(hit, () => {
+        const acc = mc.acc[key];
+        if (!acc.n || !acc.buckets[i]) return null;
+        let cum = acc.busts;
+        for (let j = 0; j <= i; j++) cum += acc.buckets[j];
+        return tipHtml(money(bLo(i)) + " – " + money(bLo(i + 1)), [
+          acc.buckets[i].toLocaleString("en-US") +
+            " replays · " +
+            pctShare(acc.buckets[i], acc.n),
+          '<span class="dim">' +
+            Math.round((cum / acc.n) * 100) +
+            "% of " +
+            betsName +
+            " ended at or below " +
+            money(bLo(i + 1)) +
+            "</span>",
+        ]);
+      });
+    }
+    const bustHit = svgEl(
+      "rect",
+      {
+        x: padL,
+        y: padT,
+        width: bustW - 8,
+        height: plotH,
+        fill: "transparent",
+      },
+      svg,
+    );
+    bindTip(bustHit, () => {
+      const acc = mc.acc[key];
+      if (!acc.n || !acc.busts) return null;
+      return tipHtml("$0 — busted", [
+        acc.busts.toLocaleString("en-US") +
+          " replays · " +
+          pctShare(acc.busts, acc.n),
+      ]);
+    });
+
+    container.textContent = "";
+    container.appendChild(svg);
+    mc.built[key] = { bars, bustBar, baseY, plotH, width: avail };
+    return mc.built[key];
+  }
+
+  function renderMC() {
+    if (!mc) return;
+    const note = $("mc-note");
+    const a = mc.acc[mcMode];
+    const built = mc.built[mcMode] || mcBuild();
+    if (!a.n) {
+      note.textContent = "Simulating…";
+      return;
+    }
+
+    // bar heights normalize against a quantized ceiling ({1,2,5}×10ᵏ of the
+    // peak share) so they converge instead of creeping every tick
+    let maxFrac = a.busts / a.n;
+    for (let i = 0; i < a.NB; i++)
+      if (a.buckets[i] > maxFrac * a.n) maxFrac = a.buckets[i] / a.n;
+    const ceil = niceTickStep(Math.max(maxFrac, 1e-9), 1);
+    const setBar = (rect, count) => {
+      const h = count
+        ? Math.max(1.5, (count / a.n / ceil) * built.plotH)
+        : 0;
+      rect.setAttribute("y", built.baseY - h);
+      rect.setAttribute("height", h);
+    };
+    for (let i = 0; i < a.NB; i++) setBar(built.bars[i], a.buckets[i]);
+    setBar(built.bustBar, a.busts);
+
+    const betsName = mcMode === "chosen" ? "your own bets" : "exact Kelly bets";
+    const nStr = a.n.toLocaleString("en-US");
+    const evStr = money(mc.ev[mcMode]);
     note.textContent =
-      "your " +
-      money(user) +
-      " beats " +
-      Math.round((below / arr.length) * 100) +
-      "% of " +
-      arr.length.toLocaleString("en-US") +
-      " replays of " +
-      (mcMode === "chosen" ? "your bets" : "exact Kelly bets") +
-      " · serial EV " +
-      money(ev);
+      mc.user >= 1
+        ? "Your " +
+          money(mc.user) +
+          " finished ahead of " +
+          Math.round((a.behind / a.n) * 100) +
+          "% of " +
+          nStr +
+          " replays of " +
+          betsName +
+          ". Serial EV is " +
+          evStr +
+          "."
+        : "You busted. " +
+          Math.round((a.busts / a.n) * 100) +
+          "% of " +
+          nStr +
+          " replays of " +
+          betsName +
+          " also ended at $0. Serial EV is " +
+          evStr +
+          ".";
+  }
+
+  /* ---------- tooltips (shared by every chart) ---------- */
+
+  function tipHtml(title, rows) {
+    return (
+      '<div class="tip-t">' +
+      title +
+      "</div>" +
+      rows.map((r) => '<div class="tip-r">' + r + "</div>").join("")
+    );
+  }
+
+  function pctShare(c, t) {
+    const p = t > 0 ? (c / t) * 100 : 0;
+    return (p >= 9.95 ? Math.round(p) : p.toFixed(1)) + "%";
+  }
+
+  function showTip(html, cx, cy) {
+    const tip = $("tooltip");
+    tip.innerHTML = html;
+    tip.style.display = "block";
+    const pad = 12;
+    const tw = tip.offsetWidth,
+      th = tip.offsetHeight;
+    let left = cx + pad;
+    if (left + tw > innerWidth - 8) left = cx - tw - pad;
+    left = Math.max(8, left);
+    // above the pointer by default; flip below when it would clip the top
+    let top = cy - th - 14;
+    if (top < 8) top = cy + 18;
+    top = Math.min(top, innerHeight - th - 8);
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
+  }
+
+  function hideTip() {
+    $("tooltip").style.display = "none";
+  }
+  window.addEventListener("scroll", hideTip, { passive: true, capture: true });
+
+  // Pointer events cover mouse and touch with one wiring: mouse reads on
+  // hover; touch reads while pressed and releases cleanly on lift — nothing
+  // sticks. content(ev) returns html, or null for "nothing here".
+  function bindTip(el, content) {
+    const show = (ev) => {
+      const html = content(ev);
+      if (html) showTip(html, ev.clientX, ev.clientY);
+      else hideTip();
+    };
+    el.addEventListener("pointermove", show);
+    el.addEventListener("pointerdown", show);
+    el.addEventListener("pointerleave", hideTip);
+    el.addEventListener("pointercancel", hideTip);
+    el.addEventListener("pointerup", (ev) => {
+      if (ev.pointerType !== "mouse") hideTip();
+    });
   }
 
   /* ---------- histogram (inline SVG) ---------- */
@@ -961,7 +1199,13 @@
   window.addEventListener("resize", () => {
     clearTimeout(histResizeTimer);
     histResizeTimer = setTimeout(() => {
-      if (!$("results-view").classList.contains("hidden")) renderHistogram();
+      if ($("results-view").classList.contains("hidden")) return;
+      renderHistogram();
+      // the outcome chart's cached SVG is width-specific — rebuild it
+      if (mc) {
+        mc.built = {};
+        renderMC();
+      }
     }, 150);
   });
 
@@ -1207,8 +1451,8 @@
     for (let v = 0; v <= 4; v++) xLabel(xOf((v + 1) * 10 + 1) - 1, String(v));
     xLabel(xOf(61) + slot / 2, ">5");
 
-    // hover layer — full-height hit targets, one per bucket
-    const tooltip = $("tooltip");
+    // hover/tap layer — full-height hit targets, one per bucket
+    const nRounds = state.game.history.length;
     for (let i = 0; i < 62; i++) {
       const b = B[i];
       const hit = svgEl(
@@ -1216,33 +1460,42 @@
         { x: xOf(i), y: padT, width: slot, height: plotH, fill: "transparent" },
         svg,
       );
-      hit.addEventListener("mousemove", (ev) => {
+      bindTip(hit, () => {
         const total = b.w + b.l + b.n;
-        let detail;
-        if (!total) detail = "no rounds";
-        else if (histMode === "event")
-          detail =
-            b.w + "W · " + b.l + "L" + (b.n ? " · " + b.n + " other" : "");
+        if (!total) return null;
+        const rows = [
+          total +
+            (total === 1 ? " round" : " rounds") +
+            " · " +
+            pctShare(total, nRounds) +
+            " of the game",
+        ];
+        if (histMode === "event")
+          rows.push(
+            '<span class="up">' +
+              b.w +
+              ' won</span> · <span class="dn">' +
+              b.l +
+              " lost</span>" +
+              (b.n ? " · " + b.n + " other" : ""),
+          );
         else if (histMode === "value")
-          detail = "+" + money(b.up) + " · −" + money(b.down);
+          rows.push(
+            '<span class="up">+' +
+              money(b.up) +
+              ' won</span> · <span class="dn">−' +
+              money(b.down) +
+              " lost</span>",
+          );
         else
-          detail =
-            "+" +
-            (Math.expm1(b.gUp) * 100).toFixed(1) +
-            "% · −" +
-            (-Math.expm1(-b.gDown) * -100).toFixed(1) +
-            "%";
-        tooltip.innerHTML = "<b>" + bucketLabel(i) + "</b> · " + detail;
-        tooltip.style.display = "block";
-        const pad = 12;
-        const tw = tooltip.offsetWidth;
-        let left = ev.clientX + pad;
-        if (left + tw > window.innerWidth - 8) left = ev.clientX - tw - pad;
-        tooltip.style.left = left + "px";
-        tooltip.style.top = ev.clientY - 34 + "px";
-      });
-      hit.addEventListener("mouseleave", () => {
-        tooltip.style.display = "none";
+          rows.push(
+            '<span class="up">+' +
+              (Math.expm1(b.gUp) * 100).toFixed(1) +
+              '% gained</span> · <span class="dn">−' +
+              (-Math.expm1(-b.gDown) * 100).toFixed(1) +
+              "% given back</span>",
+          );
+        return tipHtml(bucketLabel(i), rows);
       });
     }
 
@@ -1635,6 +1888,30 @@
         dot(x0, 0, "var(--bad)", (x0 * 100).toFixed(0) + "%", "var(--bad)");
     }
 
+    // read any point on the curve: bet size → growth per round
+    const hover = svgEl(
+      "rect",
+      {
+        x: padL,
+        y: padT,
+        width: W - padL - padR,
+        height: H - padT - padB,
+        fill: "transparent",
+      },
+      svg,
+    );
+    bindTip(hover, (ev) => {
+      const rect = svg.getBoundingClientRect();
+      const fx = Math.min(
+        xMax,
+        Math.max(0, ((ev.clientX - rect.left - padL) / (W - padL - padR)) * xMax),
+      );
+      let title = "Bet " + Math.round(fx * 100) + "% of bankroll";
+      if (f > 0 && Math.abs(fx - f) < 0.02) title += " — optimal";
+      else if (x0 !== null && Math.abs(fx - x0) < 0.02) title += " — break-even";
+      return tipHtml(title, ["growth " + fmtPct(r(fx)) + " per round"]);
+    });
+
     container.appendChild(svg);
     if (animate && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
       const len = path.getTotalLength();
@@ -1742,13 +2019,6 @@
       if (state.game.history.length === 0) return;
       endGame("cashout");
     });
-    $("restart").addEventListener("click", () => {
-      if (
-        state.game.history.length === 0 ||
-        confirm("Abandon the current game?")
-      )
-        newGame();
-    });
     $("extend").addEventListener("click", extendGame);
     $("play-again").addEventListener("click", newGame);
 
@@ -1851,7 +2121,10 @@
       });
     }
     document.addEventListener("click", hideMenu);
-    document.addEventListener("scroll", hideMenu, true);
+    document.addEventListener("scroll", hideMenu, {
+      capture: true,
+      passive: true,
+    });
     document.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") hideMenu();
     });
