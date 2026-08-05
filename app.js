@@ -266,6 +266,10 @@
     g.phase = "playing";
     g.endReason = null;
     genNext();
+    // the final round's pop may have been cut short when the board hid —
+    // returning to the board must not replay it
+    $("bankroll-pop").textContent = "";
+    $("bankroll-pop").className = "";
     save();
     render();
   }
@@ -325,14 +329,17 @@
     pop.classList.add("animate");
   }
 
-  // once the pop has played, remove it entirely — a lingering .animate would
-  // replay the animation whenever the board is hidden and shown again
-  // (toggling the info page, ending a game)
-  $("bankroll-pop").addEventListener("animationend", () => {
-    const pop = $("bankroll-pop");
-    pop.className = "";
-    pop.textContent = "";
-  });
+  // once the pop has played — or was cut short by the board being hidden
+  // (ending a game mid-animation fires animationcancel) — remove it entirely.
+  // A lingering .animate would replay whenever the board is shown again
+  // (toggling the info page, Continue after a completed game).
+  for (const evName of ["animationend", "animationcancel"]) {
+    $("bankroll-pop").addEventListener(evName, () => {
+      const pop = $("bankroll-pop");
+      pop.className = "";
+      pop.textContent = "";
+    });
+  }
 
   /* ---------- ledger (shared by game view and results) ---------- */
 
@@ -397,13 +404,23 @@
     for (const a of opts) chips += chip(money(a), clsFor(a), title(a));
     chips += chip("pass", clsFor(0), passTitle);
 
+    // expected return per $1 staked — a push hands the stake back, so the
+    // binary form covers ternary rounds too. Negative edges read red: the
+    // trap rounds are exactly what this column is for.
+    const ev = e.p * e.b - e.q;
     const cells = [
       "<td>" + e.n + "</td>",
-      '<td class="dim" title="1× ' +
+      '<td class="' +
+        (ev < 0 ? "lose" : "dim") +
+        '" title="' +
+        oddsMain(e.b) +
+        " · 1× " +
         (e.kelly > 0 ? money(e.kelly * e.before) : "pass") +
         '">' +
-        oddsMain(e.b) +
+        (ev < 0 ? "−" : "+") +
+        pct(Math.abs(ev)) +
         "</td>",
+      '<td class="dim">' + probStr(e.q) + "</td>",
       '<td class="opts">' + chips + "</td>",
       "<td>" + (coaching ? scoreStr(scoreOf(e)) : "") + "</td>",
     ];
@@ -422,7 +439,10 @@
 
   function ledgerHead(coaching) {
     return (
-      '<tr><th class="c-n">#</th><th class="c-odds">Odds</th><th class="c-opts">Bet</th>' +
+      '<tr><th class="c-n">#</th>' +
+      '<th class="c-ev" title="expected return per $1 staked">EV</th>' +
+      '<th class="c-risk" title="chance of losing the stake">Risk</th>' +
+      '<th class="c-opts">Bet</th>' +
       '<th class="c-k" title="your bet ÷ the Kelly bet">' +
       (coaching ? "k" : "") +
       "</th>" +
@@ -433,8 +453,8 @@
   // row #0 is the opening balance — the ledger is always on the page
   function zeroRow() {
     return (
-      '<tr><td class="dim">0</td><td></td><td class="opts"></td><td></td>' +
-      "<td></td><td>" +
+      '<tr><td class="dim">0</td><td></td><td></td><td class="opts"></td>' +
+      "<td></td><td></td><td>" +
       money(START_BANKROLL) +
       "</td></tr>"
     );

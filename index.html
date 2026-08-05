@@ -295,13 +295,15 @@
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
   }
   input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
-  /* one action: the whole row is the confirm button, values inside it */
+  /* one action: the whole row is the confirm button, values inside it.
+     generous side padding pulls the ends inward so the middle gap between
+     the amount and the Confirm label doesn't dominate the row */
   button.confirm {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     width: 100%;
-    padding: 14px 18px;
+    padding: 14px 30px;
     min-height: 54px;
     font-size: 17px;
   }
@@ -572,10 +574,11 @@
   .ledger-scroll { overflow-x: auto; margin-top: 10px; }
   #ledger-game td, #ledger-game th { padding: 5px 8px; }
   /* fixed layout: column widths never reflow with content */
-  #ledger-game, #history-table { table-layout: fixed; width: 100%; min-width: 620px; }
+  #ledger-game, #history-table { table-layout: fixed; width: 100%; min-width: 650px; }
   th.c-n { width: 26px; }
-  th.c-odds { width: 60px; }
-  /* round + odds read as a tight right-aligned pair, no dead air */
+  th.c-ev { width: 56px; }
+  th.c-risk { width: 46px; }
+  /* round + figures read as a tight right-aligned band, no dead air */
   #ledger-game th:first-child, #ledger-game td:first-child,
   #history-table th:first-child, #history-table td:first-child { text-align: right; }
   th.c-k { width: 46px; }
@@ -606,7 +609,8 @@
     #ledger-game td, #ledger-game th,
     #history-table td, #history-table th { padding: 5px 4px; }
     th.c-n { width: 22px; }
-    th.c-odds { width: 48px; }
+    th.c-ev { width: 44px; }
+    th.c-risk { width: 36px; }
     th.c-k { width: 34px; }
     th.c-money { width: 60px; }
     .chip { width: 46px; font-size: 10px; margin: 1px 2px 1px 0; }
