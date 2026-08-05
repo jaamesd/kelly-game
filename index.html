@@ -1,0 +1,958 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brk or Bust · Kelly Bet Simulator</title>
+<meta name="description" content="A multi-round betting game for training your Kelly criterion intuition.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎲</text></svg>">
+<style>
+  /* Self-hosted faces: Barlow Condensed carries the numbers (odds-board
+     vernacular), Barlow the prose, IBM Plex Mono the data surfaces. */
+  @font-face { font-family: "Barlow Condensed"; font-weight: 500; font-style: normal; font-display: swap; src: url(fonts/BarlowCondensed-500.woff2) format("woff2"); }
+  @font-face { font-family: "Barlow Condensed"; font-weight: 600; font-style: normal; font-display: swap; src: url(fonts/BarlowCondensed-600.woff2) format("woff2"); }
+  @font-face { font-family: "Barlow Condensed"; font-weight: 700; font-style: normal; font-display: swap; src: url(fonts/BarlowCondensed-700.woff2) format("woff2"); }
+  @font-face { font-family: "Barlow"; font-weight: 400; font-style: normal; font-display: swap; src: url(fonts/Barlow-400.woff2) format("woff2"); }
+  @font-face { font-family: "Barlow"; font-weight: 500; font-style: normal; font-display: swap; src: url(fonts/Barlow-500.woff2) format("woff2"); }
+  @font-face { font-family: "Barlow"; font-weight: 600; font-style: normal; font-display: swap; src: url(fonts/Barlow-600.woff2) format("woff2"); }
+  @font-face { font-family: "IBM Plex Mono"; font-weight: 400; font-style: normal; font-display: swap; src: url(fonts/IBMPlexMono-400.woff2) format("woff2"); }
+  @font-face { font-family: "IBM Plex Mono"; font-weight: 500; font-style: normal; font-display: swap; src: url(fonts/IBMPlexMono-500.woff2) format("woff2"); }
+
+  :root {
+    color-scheme: light;
+    --font-display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+    --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --page: #f9f9f7;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --hairline: rgba(11, 11, 11, 0.12);
+    --baseline: #c3c2b7;
+    --surface: #fcfcfb;
+    --accent: #1460b8;
+    --accent-ink: #ffffff;
+    --good: #006300;
+    --bad: #d03b3b;
+    --wash: rgba(20, 96, 184, 0.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --hairline: rgba(255, 255, 255, 0.14);
+      --baseline: #383835;
+      --surface: #1a1a19;
+      --accent: #3c7fd0;
+      --good: #0ca30c;
+      --wash: rgba(60, 127, 208, 0.12);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 15.5px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overflow-x: clip;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 40px 20px 80px; }
+
+  /* ---------- type system ---------- */
+  .micro {
+    font-family: var(--font-body);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .rule { border: 0; border-top: 1px solid var(--hairline); margin: 22px 0; }
+  .section-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
+  .head-actions { display: flex; gap: 2px; }
+  .head-actions .ghost { color: var(--muted); }
+  .head-actions .ghost:hover { color: var(--ink); }
+
+  .masthead { display: flex; align-items: baseline; gap: 14px; }
+  .brand {
+    font-family: var(--font-display);
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .tagline { flex: 1; font-size: 12.5px; color: var(--muted); }
+  .masthead .info-btn { align-self: center; }
+
+  /* ---------- the board ---------- */
+  .board { margin-top: 26px; }
+  /* one grid, four rows: numbers then labels, twice — every label in a band
+     shares a baseline with its neighbors across both sides of the board */
+  .board-body {
+    display: grid;
+    grid-template-columns: repeat(3, max-content) 1fr max-content;
+    align-items: baseline;
+    /* inset so the figures' optical margin matches the button row below */
+    padding: 0 12px;
+    /* the outcome pop centers over this block */
+    position: relative;
+  }
+  .b-hero { grid-area: 1 / 1 / 2 / 5; }
+  .b-hero-l { grid-area: 2 / 1 / 3 / 5; }
+  .b-bal { grid-area: 1 / 5; justify-self: end; }
+  .b-bal-l { grid-area: 2 / 5; justify-self: end; }
+  .b-win { grid-area: 3 / 1; }
+  .b-lose { grid-area: 3 / 2; }
+  .b-push { grid-area: 3 / 3; }
+  .b-round { grid-area: 3 / 5; justify-self: end; }
+  .b-win-l { grid-area: 4 / 1; }
+  .b-lose-l { grid-area: 4 / 2; }
+  .b-push-l { grid-area: 4 / 3; }
+  .b-round-l { grid-area: 4 / 5; justify-self: end; }
+  .b-win, .b-lose, .b-win-l, .b-lose-l { margin-right: clamp(28px, 7vw, 52px); }
+  .b-win, .b-lose, .b-push, .b-round { margin-top: 18px; }
+  .bank-round {
+    font-family: var(--font-display);
+    font-size: clamp(28px, 8vw, 34px);
+    font-weight: 600;
+    line-height: 1;
+  }
+  #bankroll {
+    font-family: var(--font-display);
+    font-size: clamp(28px, 8vw, 34px);
+    font-weight: 600;
+    line-height: 1;
+    transition: color 0.15s;
+  }
+  #bankroll.flash-win { color: var(--good); }
+  #bankroll.flash-lose { color: var(--bad); }
+  .fig-num {
+    font-family: var(--font-display);
+    font-size: clamp(60px, 15vw, 84px);
+    font-weight: 700;
+    line-height: 0.9;
+    white-space: nowrap;
+  }
+  /* stable digit widths — figures don't jiggle as values change */
+  .fig-num, .prob-num, #bankroll, .bank-round, button.bet .amt {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+  .fig-label {
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+  /* round, balance, and the probabilities share one size, and the prob
+     columns reserve a fixed width — values change, nothing ever shifts */
+  .prob-num {
+    font-family: var(--font-display);
+    font-size: clamp(28px, 8vw, 34px);
+    font-weight: 600;
+    line-height: 0.9;
+    white-space: nowrap;
+  }
+  .b-win, .b-lose, .b-push { min-width: 5.2ch; }
+
+  .hint { font-family: var(--font-mono); font-size: 12px; color: var(--muted); margin: 10px 0 18px; }
+  /* the proposition line reads like a selected option: brighter, heavier,
+     centered with room to breathe */
+  .board-hint {
+    text-align: center;
+    font-weight: 500;
+    color: var(--ink-2);
+    margin: 20px 0 22px;
+  }
+
+  /* ---------- buttons ---------- */
+  /* quiet by default — the pill only surfaces on hover */
+  button {
+    font-family: var(--font-display);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--ink);
+    padding: 9px 16px;
+    min-height: 40px;
+    cursor: pointer;
+    transition: border-color 0.12s, background 0.12s, transform 0.05s;
+  }
+  button:hover { border-color: var(--accent); background: var(--wash); }
+  button:active { transform: scale(0.98); }
+  /* keyboard picks flash the button like a click */
+  button.pressed {
+    border-color: var(--accent);
+    background: var(--wash);
+    transform: scale(0.97);
+  }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button:disabled { opacity: 0.4; cursor: default; }
+
+  .choices { display: flex; gap: 10px; flex-wrap: wrap; align-items: stretch; }
+  /* one row of five on wide screens; three rows (pass double-wide) on narrow */
+  #choice-buttons { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  button.bet {
+    min-width: 0;
+    padding: 13px 8px 11px;
+    text-align: center;
+    line-height: 1;
+  }
+  button.bet .amt { display: block; font-family: var(--font-display); font-size: 25px; font-weight: 700; line-height: 1; }
+  button.bet .frac { display: block; font-family: var(--font-mono); font-size: 10.5px; font-weight: 400; color: var(--muted); margin-top: 5px; text-transform: none; letter-spacing: 0; }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+  }
+  button.primary:hover { background: var(--accent); filter: brightness(1.08); }
+  button.ghost { color: var(--ink-2); }
+  button.ghost:hover { border-color: var(--hairline); background: transparent; color: var(--ink); }
+  button.small { padding: 6px 12px; min-height: 32px; }
+
+  /* ---------- slider ---------- */
+  input[type="range"] {
+    display: block;
+    width: 100%;
+    margin-bottom: 14px;
+    appearance: none;
+    -webkit-appearance: none;
+    height: 28px;
+    background: transparent;
+    cursor: pointer;
+    --fill: 0%;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(to right, var(--muted) var(--fill), var(--grid) var(--fill));
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 22px;
+    height: 22px;
+    margin-top: -9px;
+    border-radius: 50%;
+    background: var(--ink);
+    border: 3px solid var(--page);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  }
+  input[type="range"]::-moz-range-track {
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(to right, var(--muted) var(--fill), var(--grid) var(--fill));
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--ink);
+    border: 3px solid var(--page);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  }
+  input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+  /* one action: the whole row is the confirm button, values inside it */
+  button.confirm {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    width: 100%;
+    padding: 14px 18px;
+    min-height: 54px;
+    font-size: 17px;
+  }
+  .confirm-vals { display: inline-flex; align-items: baseline; gap: 16px; }
+  #slider-amount {
+    font-family: var(--font-display);
+    font-size: 25px;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+  #bips-pct {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    min-width: 6.5ch;
+    text-align: right;
+  }
+  input[type="number"] {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    width: 72px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--hairline);
+    background: transparent;
+    color: var(--ink);
+  }
+  kbd {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--muted);
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
+    padding: 0 4px;
+    line-height: 1.5;
+  }
+  button.primary kbd { color: var(--accent-ink); border-color: rgba(255, 255, 255, 0.4); }
+
+  /* ---------- outcome pop ---------- */
+  /* the result lands big, mid-screen, then rises away */
+  @keyframes pop-rise {
+    0% { opacity: 0; transform: translate(-50%, -50%) translateY(16px) scale(0.94); }
+    15% { opacity: 1; transform: translate(-50%, -50%) translateY(0) scale(1); }
+    70% { opacity: 1; }
+    100% { opacity: 0; transform: translate(-50%, -50%) translateY(-28px) scale(1); }
+  }
+  #bankroll-pop {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-family: var(--font-display);
+    font-size: clamp(84px, 18vw, 150px);
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 10;
+  }
+  #bankroll-pop.animate { animation: pop-rise 1.5s ease-out forwards; }
+  /* sign hangs left of the amount so the amount is what's centered */
+  #bankroll-pop .pop-sign { position: absolute; right: 100%; }
+  #bankroll-pop.win { color: var(--good); }
+  #bankroll-pop.lose { color: var(--bad); }
+  #bankroll-pop.push, #bankroll-pop.pass { color: var(--muted); }
+  @keyframes pop-fade {
+    0% { opacity: 1; }
+    70% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #bankroll-pop.animate { animation: pop-fade 1.5s ease-out forwards; }
+  }
+
+  .notice {
+    border-left: 2px solid var(--accent);
+    padding: 2px 0 2px 14px;
+    margin: 22px 0;
+    font-size: 13.5px;
+    color: var(--ink-2);
+  }
+  .notice b { color: var(--ink); }
+
+  /* ---------- settings ---------- */
+  .settings { display: grid; row-gap: 14px; font-size: 13.5px; }
+  .setting {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    column-gap: 24px;
+    align-items: baseline;
+  }
+  .radio-row { display: flex; flex-wrap: wrap; gap: 6px 20px; }
+  /* radios are typography, not widgets: muted text, selected = ink + bold.
+     each label reserves its bold width (hidden ::after) so selection never
+     shifts its neighbors */
+  .radio-col { display: flex; flex-direction: column; gap: 6px; }
+  .radio-col label, .radio-row label, .check-label {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    cursor: pointer;
+    font-size: 13.5px;
+    color: var(--muted);
+    position: relative;
+  }
+  .radio-col label::after, .radio-row label::after {
+    content: attr(data-t);
+    font-weight: 600;
+    height: 0;
+    overflow: hidden;
+    visibility: hidden;
+  }
+  .radio-col label:hover, .radio-row label:hover, .check-label:hover { color: var(--ink); }
+  .radio-col input[type="radio"], .radio-row input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    width: 0;
+    height: 0;
+    margin: 0;
+  }
+  .radio-col label:has(input:checked), .radio-row label:has(input:checked) {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .radio-col label:has(input:focus-visible), .radio-row label:has(input:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
+  .footer-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; align-items: center; }
+  /* results actions sit right, like the game view's header actions */
+  #results-view .footer-actions { justify-content: flex-end; }
+
+  /* ---------- results — the summary is the board with summary numbers */
+  #stat-sumwin { color: var(--good); }
+  #stat-sumloss { color: var(--bad); }
+  .res-body { grid-template-columns: repeat(4, max-content) 1fr max-content; }
+  .ph { grid-area: 1 / 1 / 2 / 6; }
+  .ph-l { grid-area: 2 / 1 / 3 / 6; }
+  .pm { grid-area: 1 / 6; justify-self: end; }
+  .pm-l { grid-area: 2 / 6; justify-self: end; }
+  .w1 { grid-area: 3 / 1; } .w2 { grid-area: 3 / 2; } .w3 { grid-area: 3 / 3; } .w4 { grid-area: 3 / 4; }
+  .w5 { grid-area: 3 / 6; justify-self: end; }
+  .w1l { grid-area: 4 / 1; } .w2l { grid-area: 4 / 2; } .w3l { grid-area: 4 / 3; } .w4l { grid-area: 4 / 4; }
+  .w5l { grid-area: 4 / 6; justify-self: end; }
+  .l1 { grid-area: 5 / 1; } .l2 { grid-area: 5 / 2; } .l3 { grid-area: 5 / 3; } .l4 { grid-area: 5 / 4; }
+  .l5 { grid-area: 5 / 6; justify-self: end; }
+  .l1l { grid-area: 6 / 1; } .l2l { grid-area: 6 / 2; } .l3l { grid-area: 6 / 3; } .l4l { grid-area: 6 / 4; }
+  .l5l { grid-area: 6 / 6; justify-self: end; }
+  .res-body :is(.w1, .w2, .w3, .w4, .l1, .l2, .l3, .l4,
+    .w1l, .w2l, .w3l, .w4l, .l1l, .l2l, .l3l, .l4l) {
+    margin-right: clamp(22px, 4.5vw, 44px);
+  }
+  .res-body :is(.w1, .w2, .w3, .w4, .w5, .l1, .l2, .l3, .l4, .l5) { margin-top: 18px; }
+  /* dollar figures run wider than the game's probabilities — step the bands
+     down on phones so five figures still share one row */
+  @media (max-width: 520px) {
+    #results-view .prob-num { font-size: 21px; }
+    .res-body .fig-label { font-size: 9.5px; letter-spacing: 0.06em; }
+    .res-body :is(.w1, .w2, .w3, .w4, .l1, .l2, .l3, .l4,
+      .w1l, .w2l, .w3l, .w4l, .l1l, .l2l, .l3l, .l4l) {
+      margin-right: 8px;
+    }
+  }
+
+  h2 {
+    font-family: var(--font-display);
+    font-size: 21px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    margin: 0 0 4px;
+  }
+  .section-sub { font-size: 13.5px; color: var(--muted); margin: 0 0 14px; max-width: 60ch; }
+
+  .chart-scroll { overflow-x: auto; }
+  svg text { font-family: var(--font-mono); }
+
+  #tooltip {
+    position: fixed;
+    pointer-events: none;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    box-shadow: 0 3px 14px rgba(0, 0, 0, 0.14);
+    padding: 6px 10px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    display: none;
+    z-index: 10;
+    white-space: nowrap;
+  }
+
+  /* slim, quiet scrollbars on every scroll container */
+  .table-scroll, .ledger-scroll, .chart-scroll, .modal-card {
+    scrollbar-width: thin;
+    scrollbar-color: var(--baseline) transparent;
+  }
+  .table-scroll::-webkit-scrollbar, .ledger-scroll::-webkit-scrollbar,
+  .chart-scroll::-webkit-scrollbar, .modal-card::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  .table-scroll::-webkit-scrollbar-thumb, .ledger-scroll::-webkit-scrollbar-thumb,
+  .chart-scroll::-webkit-scrollbar-thumb, .modal-card::-webkit-scrollbar-thumb {
+    background: var(--baseline);
+    border-radius: 3px;
+  }
+  .table-scroll::-webkit-scrollbar-track, .ledger-scroll::-webkit-scrollbar-track,
+  .chart-scroll::-webkit-scrollbar-track, .modal-card::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+  th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  thead th {
+    position: sticky; top: 0;
+    background: var(--page);
+    color: var(--muted);
+    font-family: var(--font-body);
+    font-weight: 600; font-size: 11px;
+    letter-spacing: 0.09em; text-transform: uppercase;
+    border-bottom: 1px solid var(--baseline);
+  }
+  td b { font-weight: 500; }
+  td.win { color: var(--good); font-weight: 500; }
+  td.lose { color: var(--bad); }
+  td.dim { color: var(--muted); }
+
+  /* ---------- ledger chips ---------- */
+  .ledger-scroll { overflow-x: auto; margin-top: 10px; }
+  #ledger-game td, #ledger-game th { padding: 5px 8px; }
+  /* fixed layout: column widths never reflow with content */
+  #ledger-game, #history-table { table-layout: fixed; width: 100%; min-width: 620px; }
+  th.c-n { width: 26px; }
+  th.c-odds { width: 60px; }
+  /* round + odds read as a tight right-aligned pair, no dead air */
+  #ledger-game th:first-child, #ledger-game td:first-child,
+  #history-table th:first-child, #history-table td:first-child { text-align: right; }
+  th.c-k { width: 46px; }
+  th.c-money { width: 84px; }
+  th.c-opts, td.opts { text-align: center; white-space: nowrap; }
+  .chip {
+    display: inline-flex;
+    justify-content: center;
+    align-items: baseline;
+    gap: 4px;
+    width: 56px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.4;
+    padding: 2px 0;
+    border: 1px solid var(--hairline);
+    border-radius: 999px;
+    margin: 1px 3px 1px 0;
+    color: var(--ink-2);
+  }
+  .chip.best { border: 2px solid var(--accent); padding: 1px 0; color: var(--ink); }
+  .chip.sel { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .chip.sel.best { box-shadow: 0 0 0 1.5px var(--page), 0 0 0 3px var(--accent); }
+  .chip .mult { opacity: 0.65; font-size: 10px; }
+  /* below this width the ledgers reflow to fit — nothing scrolls sideways */
+  @media (max-width: 680px) {
+    #ledger-game, #history-table { min-width: 0; font-size: 11px; }
+    #ledger-game td, #ledger-game th,
+    #history-table td, #history-table th { padding: 5px 4px; }
+    th.c-n { width: 22px; }
+    th.c-odds { width: 48px; }
+    th.c-k { width: 34px; }
+    th.c-money { width: 60px; }
+    .chip { width: 46px; font-size: 10px; margin: 1px 2px 1px 0; }
+    /* narrow: just the pick and the nearest other candidate to 0.9× Kelly */
+    .chip { display: none; }
+    .chip.sel, .chip.alt { display: inline-flex; }
+  }
+
+  #copy-status { color: var(--good); font-size: 13px; align-self: center; }
+
+  /* ---------- context menu (right-click on a history section) ---------- */
+  #ctx-menu {
+    position: fixed;
+    display: none;
+    z-index: 30;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 4px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+    min-width: 160px;
+  }
+  #ctx-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    min-height: 34px;
+    padding: 7px 14px;
+    border-radius: 7px;
+  }
+  #ctx-menu button:hover { background: var(--wash); border-color: transparent; }
+  .hidden { display: none !important; }
+
+  /* ---------- info page ---------- */
+  .title-row { display: flex; align-items: center; gap: 14px; }
+  .info-btn {
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+    padding: 0;
+    border-radius: 50%;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-style: italic;
+    color: var(--muted);
+    line-height: 1;
+  }
+  .info-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+  }
+  /* the info page swaps the masthead for its own title row */
+  .info-title {
+    flex: 1;
+    font-family: var(--font-display);
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin: 0;
+    line-height: 1;
+  }
+  #info-view .masthead { margin-bottom: 26px; }
+  .info-section { margin-top: 6px; }
+  .def-line { color: var(--muted); font-size: 13.5px; margin: 2px 0 0; }
+  .def-rows { display: grid; row-gap: 10px; margin: 22px 0 0; }
+  .def-row-text { font-size: 13.5px; color: var(--ink-2); }
+  /* the equation is typeset as mathematics: serif italics, true fraction,
+     centered like a display equation */
+  .equation {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    font-family: "STIX Two Math", "Cambria Math", Georgia, "Times New Roman", serif;
+    font-size: clamp(19px, 5vw, 23px);
+    margin: 26px 0 22px;
+  }
+  .equation i { font-style: italic; }
+  .equation sub { font-size: 0.6em; font-style: normal; }
+  .equation sup { font-size: 0.65em; margin-left: 0.14em; }
+  .eq-frac { display: inline-flex; flex-direction: column; text-align: center; line-height: 1.3; }
+  .eq-num { padding: 0 12px 3px; }
+  .eq-den { padding: 3px 12px 0; border-top: 1px solid var(--ink); }
+  #calc-format { margin: 20px 0 6px; }
+  .calc-sliders { display: grid; gap: 14px; margin: 18px 0 6px; }
+  .calc-sliders label, .calc-sliders .calc-row {
+    display: grid;
+    grid-template-columns: 44px 1fr 92px;
+    align-items: center;
+    gap: 14px;
+  }
+  .calc-sliders .name {
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .calc-sliders input[type="range"] { margin: 0; }
+  .calc-sliders .val {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--ink);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    background: none;
+    border: 0;
+    padding: 0;
+    width: 100%;
+    min-width: 0;
+  }
+  .calc-sliders .val:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  .calc-sliders .calc-row .val { color: var(--muted); }
+  #calc-chart { margin-top: 6px; }
+
+  /* ---------- narrow screens ---------- */
+  @media (max-width: 520px) {
+    .wrap { padding: 28px 16px 64px; }
+    .rule { margin: 22px 0; }
+    .tagline { display: none; }
+    .settings { row-gap: 16px; }
+    .setting { grid-template-columns: 1fr; row-gap: 5px; }
+    .radio-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; }
+    .section-head { flex-direction: column; align-items: flex-start; gap: 6px; }
+    .section-head .head-actions { width: 100%; justify-content: space-between; }
+    .probs { font-size: 18px; }
+    .choices { display: grid; grid-template-columns: 1fr 1fr; }
+    #choice-buttons { grid-template-columns: 1fr 1fr; }
+    #choice-buttons button:nth-child(5) { grid-column: 1 / -1; }
+    button.bet { min-width: 0; width: 100%; }
+    button { min-height: 44px; }
+
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead" id="masthead">
+    <span class="brand">Brk or Bust</span>
+    <span class="tagline">Kelly Bet Simulator</span>
+    <button class="info-btn" id="info-open" aria-label="What is the Kelly criterion?">i</button>
+  </header>
+
+  <div id="advanced-notice" class="notice hidden">
+    <b>Ternary rounds.</b> Win + lose &lt; 100% — the rest pushes, stake returned.
+  </div>
+
+  <!-- ===================== game view ===================== -->
+  <div id="game-view">
+    <section class="board">
+      <div class="board-body">
+        <div class="fig-num b-hero" id="odds-line">2.40</div>
+        <div class="fig-label b-hero-l" id="odds-label">decimal odds</div>
+        <span class="b-bal" id="bankroll"><span id="bankroll-num">$1,000</span><span id="bankroll-pop" aria-live="polite"></span></span>
+        <span class="fig-label b-bal-l">balance</span>
+        <div class="prob-num b-win" id="win-num">49%</div>
+        <div class="prob-num b-lose" id="lose-num">51%</div>
+        <div class="prob-num b-push hidden" id="push-num">0%</div>
+        <span class="bank-round b-round" id="round-label">1/99</span>
+        <div class="fig-label b-win-l">win</div>
+        <div class="fig-label b-lose-l">lose</div>
+        <div class="fig-label b-push-l hidden" id="push-label">push</div>
+        <span class="fig-label b-round-l">round · <span id="mode-tag">easy</span></span>
+      </div>
+      <p class="hint board-hint" id="payout-hint"></p>
+
+      <div id="mc-controls">
+        <div class="choices" id="choice-buttons"></div>
+      </div>
+
+      <div id="slider-controls" class="hidden">
+        <input type="range" id="bips-slider" min="0" max="10000" step="1" value="0" aria-label="Bet size in basis points">
+        <button id="slider-bet" class="confirm">
+          <span class="confirm-vals"><span id="slider-amount">$0</span><span id="bips-pct">0.00%</span></span>
+          <span>Confirm</span>
+        </button>
+      </div>
+
+    </section>
+
+    <hr class="rule">
+
+    <section id="game-history">
+      <div class="section-head">
+        <h2>History</h2>
+        <span class="head-actions">
+          <button class="ghost small" id="end-now">End game</button>
+          <button class="ghost small" id="restart">New game</button>
+        </span>
+      </div>
+      <div class="ledger-scroll">
+        <table id="ledger-game"><thead></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <hr class="rule">
+
+    <section class="settings">
+      <div class="setting">
+        <span class="micro">Odds format</span>
+        <div class="radio-row" id="odds-format" role="radiogroup" aria-label="Odds format">
+          <label><input type="radio" name="odds" value="decimal" checked> Decimal</label>
+          <label><input type="radio" name="odds" value="fractional"> Fractional</label>
+          <label><input type="radio" name="odds" value="ratio"> Ratio</label>
+          <label><input type="radio" name="odds" value="american"> American</label>
+          <label><input type="radio" name="odds" value="hongkong"> Hong Kong</label>
+          <label><input type="radio" name="odds" value="indonesian"> Indonesian</label>
+          <label><input type="radio" name="odds" value="malay"> Malay</label>
+        </div>
+      </div>
+      <div class="setting">
+        <span class="micro">Challenge</span>
+        <div class="radio-row" id="challenge-mode" role="radiogroup" aria-label="Challenge">
+          <label><input type="radio" name="challenge" value="auto" checked> Default</label>
+          <label><input type="radio" name="challenge" value="easy"> Easy</label>
+          <label><input type="radio" name="challenge" value="medium"> Medium</label>
+          <label><input type="radio" name="challenge" value="hard"> Hard</label>
+        </div>
+      </div>
+      <div class="setting">
+        <span class="micro">Betting input</span>
+        <div class="radio-row" id="input-mode" role="radiogroup" aria-label="Betting input">
+          <label><input type="radio" name="input" value="mc" checked> Buttons</label>
+          <label><input type="radio" name="input" value="slider"> Slider</label>
+        </div>
+      </div>
+      <div class="setting">
+        <span class="micro">Coaching</span>
+        <div class="radio-row" id="coaching-mode" role="radiogroup" aria-label="Coaching">
+          <label><input type="radio" name="coaching" value="off" checked> Off</label>
+          <label><input type="radio" name="coaching" value="on"> On</label>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ===================== results view ===================== -->
+  <div id="results-view" class="hidden">
+    <!-- the summary keeps the board's grammar — hero + right counterweight,
+         then a win band and a loss band of figures on shared baselines -->
+    <section class="board">
+      <div class="board-body res-body">
+        <div class="fig-num ph" id="final-bankroll">$0</div>
+        <div class="fig-label ph-l">final balance</div>
+        <span class="prob-num pm" id="stat-median">–</span>
+        <span class="fig-label pm-l">median k</span>
+        <div class="prob-num w1" id="stat-sumwin">–</div>
+        <div class="prob-num w2" id="stat-avgkwin">–</div>
+        <div class="prob-num w3" id="stat-largestwin">–</div>
+        <div class="prob-num w4" id="stat-streakwin">–</div>
+        <span class="prob-num w5" id="stat-roundswon">–</span>
+        <div class="fig-label w1l">total won</div>
+        <div class="fig-label w2l">avg k win</div>
+        <div class="fig-label w3l">largest</div>
+        <div class="fig-label w4l">streak</div>
+        <span class="fig-label w5l">rounds won</span>
+        <div class="prob-num l1" id="stat-sumloss">–</div>
+        <div class="prob-num l2" id="stat-avgkloss">–</div>
+        <div class="prob-num l3" id="stat-largestloss">–</div>
+        <div class="prob-num l4" id="stat-streakloss">–</div>
+        <span class="prob-num l5" id="stat-roundslost">–</span>
+        <div class="fig-label l1l">total lost</div>
+        <div class="fig-label l2l">avg k lost</div>
+        <div class="fig-label l3l">largest</div>
+        <div class="fig-label l4l">streak</div>
+        <span class="fig-label l5l">rounds lost</span>
+      </div>
+    </section>
+
+    <hr class="rule">
+
+    <section>
+      <div class="section-head">
+        <h2>Kelly scores</h2>
+        <div class="radio-row" id="hist-mode" role="radiogroup" aria-label="Histogram mode">
+          <label><input type="radio" name="histmode" value="event" checked> Event</label>
+          <label><input type="radio" name="histmode" value="value"> Value</label>
+          <label><input type="radio" name="histmode" value="perf"> Perf</label>
+        </div>
+      </div>
+      <div class="chart-scroll" id="hist-container"></div>
+    </section>
+
+    <hr class="rule">
+
+    <section>
+      <div class="section-head">
+        <h2>Outcomes</h2>
+        <div class="radio-row" id="mc-mode" role="radiogroup" aria-label="Replay mode">
+          <label><input type="radio" name="mcmode" value="chosen" checked> Chosen play</label>
+          <label><input type="radio" name="mcmode" value="optimal"> Optimal play</label>
+        </div>
+      </div>
+      <div class="chart-scroll" id="mc-container"></div>
+      <p class="hint" id="mc-note"></p>
+    </section>
+
+    <hr class="rule">
+
+    <section id="results-history">
+      <div class="section-head">
+        <h2>History</h2>
+        <span class="head-actions">
+          <span id="copy-status"></span>
+          <button class="primary small hidden" id="extend">Continue</button>
+          <button class="ghost small" id="play-again">New game</button>
+        </span>
+      </div>
+      <div class="table-scroll">
+        <table id="history-table">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== info page ===================== -->
+  <div id="info-view" class="hidden">
+    <div class="masthead">
+      <h1 class="info-title">The Kelly Criterion</h1>
+      <button class="info-btn active" id="info-close" aria-label="Back to the game">i</button>
+    </div>
+
+    <section class="info-section">
+      <h2>Definition</h2>
+      <p class="def-line">Bet the fraction of bankroll that maximizes the long-run growth rate of your money — the size that compounds an edge fastest without ever risking ruin. It scales with the edge and shrinks with the odds; with no edge, it is zero.</p>
+      <div class="equation">
+        <span class="eq-lhs"><i>f</i><sup>*</sup>&nbsp;=</span>
+        <span class="eq-frac">
+          <span class="eq-num"><i>p</i><sub>win</sub> · odds&nbsp;−&nbsp;<i>p</i><sub>lose</sub></span>
+          <span class="eq-den">odds · (<i>p</i><sub>win</sub> + <i>p</i><sub>lose</sub>)</span>
+        </span>
+      </div>
+      <div class="def-rows">
+        <div class="setting">
+          <span class="micro">Too little</span>
+          <span class="def-row-text">You give up growth but keep the ride smooth: half the Kelly bet still captures three quarters of the growth at half the volatility.</span>
+        </div>
+        <div class="setting">
+          <span class="micro">Too much</span>
+          <span class="def-row-text">Variance outruns the edge. Growth falls faster than it rose, and past roughly twice the Kelly bet a winning proposition compounds against you.</span>
+        </div>
+        <div class="setting">
+          <span class="micro">In practice</span>
+          <span class="def-row-text">The real world is not a perfect-information game — the probabilities in the formula are your estimates, and the curve punishes overestimating an edge far more than underestimating one. Professionals bet a fixed fraction of full Kelly (half is common), and treat any bet they cannot size with confidence as a pass.</span>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule">
+
+    <section class="info-section">
+      <h2>Scoring</h2>
+      <p class="def-line">The game grades every round with k, your bet divided by that round's Kelly bet: a pass scores 0, the optimal bet scores 1, a bet into a negative edge scores below 0, and anything past 2 is in the region where growth turns negative. The end-of-game charts bucket your k's — a tight cluster around 1, with passes on the trap rounds, is the mark of a disciplined bettor.</p>
+    </section>
+
+    <hr class="rule">
+
+    <section class="info-section">
+      <h2>Calculator</h2>
+      <p class="def-line">Growth per round across every bet size, 0–100% of bankroll. The blue dot is the Kelly bet; past the red intercept the same edge loses money.</p>
+      <div id="calc-chart"></div>
+      <div class="radio-row" id="calc-format">
+        <label><input type="radio" name="calc-odds" value="decimal" checked> Decimal</label>
+        <label><input type="radio" name="calc-odds" value="fractional"> Fractional</label>
+        <label><input type="radio" name="calc-odds" value="ratio"> Ratio</label>
+        <label><input type="radio" name="calc-odds" value="american"> American</label>
+        <label><input type="radio" name="calc-odds" value="hongkong"> Hong Kong</label>
+        <label><input type="radio" name="calc-odds" value="indonesian"> Indonesian</label>
+        <label><input type="radio" name="calc-odds" value="malay"> Malay</label>
+      </div>
+      <div class="calc-sliders">
+        <label><span class="name">odds</span><input type="range" id="calc-b" min="100" max="2100" step="5" value="200"><input class="val" type="text" inputmode="decimal" id="calc-b-out" aria-label="odds value"></label>
+        <label><span class="name">win</span><input type="range" id="calc-p" min="0" max="100" value="55"><input class="val" type="text" inputmode="decimal" id="calc-p-out" aria-label="win chance"></label>
+        <label><span class="name">lose</span><input type="range" id="calc-q" min="0" max="100" value="45"><input class="val" type="text" inputmode="decimal" id="calc-q-out" aria-label="lose chance"></label>
+        <label><span class="name">push</span><input type="range" id="calc-r" min="0" max="100" value="0"><input class="val" type="text" inputmode="decimal" id="calc-r-out" aria-label="push chance"></label>
+      </div>
+    </section>
+  </div>
+
+</div>
+
+<div id="tooltip" role="tooltip"></div>
+<div id="ctx-menu" role="menu">
+  <button id="copy-tsv" role="menuitem">Copy CSV</button>
+  <button id="download-csv" role="menuitem">Download CSV</button>
+</div>
+<script src="kelly.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
