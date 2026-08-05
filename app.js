@@ -355,11 +355,28 @@
     );
   }
 
+  // Break-even intercept: where the growth curve comes back through zero,
+  // past the optimal fraction. Null when the curve never returns (or there
+  // is no edge). Shared by the row tooltip and the coached bet slider.
+  function breakEvenX(b, p, q, kelly) {
+    const cap = 0.999; // f = 1 is ln(0) — stay just inside
+    const growth = (x) => p * Math.log(1 + x * b) + q * Math.log(1 - x);
+    if (!(kelly > 0) || growth(cap) >= 0) return null;
+    let lo = kelly,
+      hi = cap;
+    for (let i = 0; i < 40; i++) {
+      const m = (lo + hi) / 2;
+      if (growth(m) >= 0) lo = m;
+      else hi = m;
+    }
+    return (lo + hi) / 2;
+  }
+
   // Row tooltip: the round's odds and probabilities over the calculator's
   // growth curve in miniature, with the actual menu marked on it.
-  // Grammar matches the chips: blue fill = your pick, blue ring = nearest
-  // candidate to optimal, green line = the optimal fraction, red dot = the
-  // break-even intercept. Available with coaching on or on the results page.
+  // Grammar matches the chips: blue fill = the closest candidate to optimal,
+  // blue ring = your pick, green line + dot = the optimal fraction, red dot
+  // = the break-even intercept. Available with coaching on or on results.
   function rowTipHtml(e) {
     const b = e.b,
       p = e.p,
@@ -371,19 +388,7 @@
     const opts = rowOpts(e);
     const selected = e.bet > 0 ? e.bet : 0;
     const nearest = pickCand(e, null);
-
-    // break-even intercept, when the curve comes back through zero
-    let x0 = null;
-    if (kelly > 0 && growth(cap) < 0) {
-      let lo = kelly,
-        hi = cap;
-      for (let i = 0; i < 40; i++) {
-        const m = (lo + hi) / 2;
-        if (growth(m) >= 0) lo = m;
-        else hi = m;
-      }
-      x0 = (lo + hi) / 2;
-    }
+    const x0 = breakEvenX(b, p, q, kelly);
 
     // the domain must hold every marked point with a little headroom
     let xMax = Math.max(0.1, kelly > 0 ? kelly * 2.5 : 0.25);
@@ -392,12 +397,15 @@
     if (x0 !== null) xMax = Math.max(xMax, x0 * 1.12);
     xMax = Math.min(xMax, cap);
 
+    // plot area on top, a label band below it — every marked point drops a
+    // vertical line into the band, where its label lives
     const W = 248,
-      H = 132,
+      H = 142,
       padL = 10,
       padR = 14,
-      padT = 18,
-      padB = 18;
+      padT = 10,
+      plotB = 104;
+    const bandY = [116, 126, 136]; // label tiers, top row first
     const N = 60;
     let yMin = 0,
       yMax = 1e-9;
@@ -410,16 +418,52 @@
       yMax = Math.max(yMax, y);
     }
     const X = (x) => padL + (x / xMax) * (W - padL - padR);
-    const Y = (y) =>
-      padT + (1 - (y - yMin) / (yMax - yMin)) * (H - padT - padB);
+    const Y = (y) => padT + (1 - (y - yMin) / (yMax - yMin)) * (plotB - padT);
     const seg = (list) =>
       list
         .map(
           ([x, y], i) => (i ? "L" : "M") + X(x).toFixed(1) + "," + Y(y).toFixed(1),
         )
         .join("");
+    const vlineAt = (cx, color, opacity) =>
+      '<line x1="' +
+      cx.toFixed(1) +
+      '" x2="' +
+      cx.toFixed(1) +
+      '" y1="' +
+      padT +
+      '" y2="' +
+      plotB +
+      '" stroke="' +
+      color +
+      '" stroke-width="1" opacity="' +
+      opacity +
+      '"/>';
 
-    let body =
+    // light grid, then the zero baseline over it
+    let body = "";
+    const xStep = niceTickStep(xMax, 4);
+    for (let gx = xStep; gx < xMax - 1e-12; gx += xStep)
+      body += vlineAt(X(gx), "var(--grid)", 1);
+    const yStep = niceTickStep(yMax - yMin, 4);
+    for (
+      let gy = Math.ceil(yMin / yStep) * yStep;
+      gy <= yMax + 1e-12;
+      gy += yStep
+    ) {
+      if (Math.abs(gy) < 1e-12) continue;
+      body +=
+        '<line x1="' +
+        padL +
+        '" x2="' +
+        (W - padR) +
+        '" y1="' +
+        Y(gy).toFixed(1) +
+        '" y2="' +
+        Y(gy).toFixed(1) +
+        '" stroke="var(--grid)" stroke-width="1"/>';
+    }
+    body +=
       '<line x1="' +
       padL +
       '" x2="' +
@@ -429,6 +473,51 @@
       '" y2="' +
       Y(0).toFixed(1) +
       '" stroke="var(--baseline)" stroke-width="1"/>';
+
+    // markers, gathered so the band labels can dodge each other — the small
+    // options cluster near x = 0 and would otherwise overprint.
+    // fill paints the dot; color paints its line and label.
+    const marks = [];
+    const cand = (x, y, text, a) =>
+      marks.push({
+        x,
+        y,
+        text,
+        amount: a,
+        fill: a === nearest ? "var(--accent)" : "var(--muted)",
+        color:
+          a === nearest || a === selected ? "var(--accent)" : "var(--muted)",
+      });
+    cand(0, 0, "pass", 0);
+    for (let i = 0; i < opts.length; i++) {
+      const f = Math.min(opts[i] / e.before, cap);
+      cand(f, r(f), String(i + 1), opts[i]);
+    }
+    // a slider bet isn't on the menu — mark it as its own point
+    if (selected > 0 && !opts.includes(selected)) {
+      const f = Math.min(selected / e.before, cap);
+      cand(f, r(f), "you", selected);
+    }
+    if (x0 !== null && x0 <= xMax)
+      marks.push({
+        x: x0,
+        y: 0,
+        text: (x0 * 100).toFixed(0) + "%",
+        amount: null,
+        color: "var(--bad)",
+      });
+    if (kelly > 0 && kelly <= xMax)
+      marks.push({
+        x: kelly,
+        y: r(kelly), // green dot on the curve's peak, plus the full line
+        text: "optimal",
+        amount: null,
+        color: "var(--good)",
+      });
+
+    // each point's vertical line, under the curve
+    for (const m of marks)
+      body += vlineAt(X(m.x), m.color, m.color === "var(--good)" ? 1 : 0.45);
 
     // accent while compounding, red past the intercept — same as the calculator
     const stroke = (d, color) =>
@@ -450,90 +539,45 @@
         );
     }
 
-    // the optimal fraction is a green line through the plot; its label sits
-    // at the foot of the line, out of the dots' label bands
-    if (kelly > 0 && kelly <= xMax) {
-      const kx = X(kelly).toFixed(1);
-      body +=
-        '<line x1="' +
-        kx +
-        '" x2="' +
-        kx +
-        '" y1="' +
-        (padT - 6) +
-        '" y2="' +
-        (H - padB) +
-        '" stroke="var(--good)" stroke-width="1"/>' +
-        '<text x="' +
-        kx +
-        '" y="' +
-        (H - 5) +
-        '" text-anchor="middle" font-size="9" fill="var(--good)">optimal</text>';
-    }
-
-    // markers, gathered first so labels can dodge each other — the small
-    // options cluster near x = 0 and would otherwise overprint
-    const marks = [];
-    marks.push({ x: 0, y: 0, text: "pass", amount: 0 });
-    for (let i = 0; i < opts.length; i++) {
-      const f = Math.min(opts[i] / e.before, cap);
-      marks.push({ x: f, y: r(f), text: String(i + 1), amount: opts[i] });
-    }
-    // a slider bet isn't on the menu — mark it as its own point
-    if (selected > 0 && !opts.includes(selected)) {
-      const f = Math.min(selected / e.before, cap);
-      marks.push({ x: f, y: r(f), text: "you", amount: selected });
-    }
-    if (x0 !== null && x0 <= xMax)
-      marks.push({
-        x: x0,
-        y: 0,
-        text: (x0 * 100).toFixed(0) + "%",
-        amount: null,
-        color: "var(--bad)",
-      });
-
+    // dots over the curve, labels in the band below the plot
     marks.sort((m1, m2) => m1.x - m2.x);
-    // three label tiers around the dot; left to right, each label takes the
-    // first tier it fits into
-    const tiers = [-8, 14, -18];
-    const lastRight = tiers.map(() => -Infinity);
+    const lastRight = bandY.map(() => -Infinity);
     for (const m of marks) {
-      const cx = X(m.x),
-        cy = Y(m.y);
-      const color =
-        m.color || (m.amount === selected ? "var(--accent)" : "var(--muted)");
-      if (m.amount !== null && m.amount === nearest)
+      const cx = X(m.x);
+      if (m.y !== null) {
+        const cy = Y(m.y);
+        // the outline ring marks what you picked
+        if (m.amount !== null && m.amount === selected)
+          body +=
+            '<circle cx="' +
+            cx.toFixed(1) +
+            '" cy="' +
+            cy.toFixed(1) +
+            '" r="5.4" fill="none" stroke="var(--accent)" stroke-width="1.3"/>';
         body +=
           '<circle cx="' +
           cx.toFixed(1) +
           '" cy="' +
           cy.toFixed(1) +
-          '" r="5.4" fill="none" stroke="var(--accent)" stroke-width="1.3"/>';
-      body +=
-        '<circle cx="' +
-        cx.toFixed(1) +
-        '" cy="' +
-        cy.toFixed(1) +
-        '" r="3" fill="' +
-        color +
-        '" stroke="var(--surface)" stroke-width="1.2"/>';
+          '" r="3" fill="' +
+          (m.fill || m.color) +
+          '" stroke="var(--surface)" stroke-width="1.2"/>';
+      }
       const half = (m.text.length * 5.5) / 2;
       const lx = Math.min(Math.max(cx, padL + half), W - padR + 8 - half);
       let tier = 0;
-      for (let t = 0; t < tiers.length; t++) {
+      for (let t = 0; t < bandY.length; t++) {
         tier = t;
-        if (lx - half > lastRight[t] + 3) break;
+        if (lx - half > lastRight[t] + 4) break;
       }
       lastRight[tier] = lx + half;
-      const ly = Math.min(Math.max(cy + tiers[tier], 8), H - 3);
       body +=
         '<text x="' +
         lx.toFixed(1) +
         '" y="' +
-        ly.toFixed(1) +
+        bandY[tier] +
         '" text-anchor="middle" font-size="9" fill="' +
-        color +
+        m.color +
         '">' +
         m.text +
         "</text>";
@@ -764,6 +808,19 @@
       addBet(0, "no bet");
     } else {
       syncSlider();
+      // with coaching, the track carries the round's answer: a green dot at
+      // the optimal fraction (0 = pass on no-edge rounds) and a red one at
+      // break-even. Positions compensate for the 22px thumb's travel.
+      const coach = state.settings.reveal;
+      const place = (id, f, show) => {
+        const el = $(id);
+        el.classList.toggle("hidden", !show);
+        if (show)
+          el.style.left = "calc(" + f * 100 + "% - " + (f - 0.5) * 22 + "px)";
+      };
+      const x0 = coach ? breakEvenX(r.b, r.p, r.q, r.kelly) : null;
+      place("slider-opt", Math.max(r.kelly, 0), coach);
+      place("slider-x0", x0 === null ? 0 : x0, coach && x0 !== null);
     }
     renderGameLedger();
   }
@@ -931,7 +988,7 @@
 
   let mcMode = "chosen";
   let mc = null;
-  const MC_CAP = 100000;
+  const MC_CAP = 40000;
 
   function mcToken() {
     const g = state.game;
@@ -1292,9 +1349,7 @@
             pctShare(acc.buckets[i], acc.n),
           '<span class="dim">' +
             Math.round((cum / acc.n) * 100) +
-            "% of " +
-            betsName +
-            " ended at or below " +
+            "% ended at or below " +
             money(bLo(i + 1)) +
             "</span>",
         ]);

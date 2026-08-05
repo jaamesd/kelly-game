@@ -58,9 +58,10 @@ const URL = "file://" + __dirname + "/index.html";
 
   await p.screenshot({ path: "m-game.png", fullPage: true });
 
-  // play 5 rounds via multiple choice
+  // play 5 rounds via multiple choice — the smallest bet (options sort
+  // descending), so a losing streak can't bust mid-script
   for (let i = 0; i < 5; i++) {
-    await p.locator("#choice-buttons button").first().click();
+    await p.locator("#choice-buttons button").nth(3).click();
   }
   // switch to slider; typed digits are big-endian percent (25 → 25%, ↵ bets),
   // and a typed 0 is a pass
