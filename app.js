@@ -355,8 +355,227 @@
     );
   }
 
-  function multStr(m) {
-    return m.toFixed(m >= 9.5 ? 0 : m >= 0.095 ? 1 : 2) + "×";
+  // Row tooltip: the round's odds and probabilities over the calculator's
+  // growth curve in miniature, with the actual menu marked on it.
+  // Grammar matches the chips: blue fill = your pick, blue ring = nearest
+  // candidate to optimal, green line = the optimal fraction, red dot = the
+  // break-even intercept. Available with coaching on or on the results page.
+  function rowTipHtml(e) {
+    const b = e.b,
+      p = e.p,
+      q = e.q;
+    const growth = (x) => p * Math.log(1 + x * b) + q * Math.log(1 - x);
+    const r = (x) => Math.expm1(growth(x));
+    const kelly = e.kelly;
+    const cap = 0.999; // f = 1 is ln(0) — clamp everything just inside
+    const opts = rowOpts(e);
+    const selected = e.bet > 0 ? e.bet : 0;
+    const nearest = pickCand(e, null);
+
+    // break-even intercept, when the curve comes back through zero
+    let x0 = null;
+    if (kelly > 0 && growth(cap) < 0) {
+      let lo = kelly,
+        hi = cap;
+      for (let i = 0; i < 40; i++) {
+        const m = (lo + hi) / 2;
+        if (growth(m) >= 0) lo = m;
+        else hi = m;
+      }
+      x0 = (lo + hi) / 2;
+    }
+
+    // the domain must hold every marked point with a little headroom
+    let xMax = Math.max(0.1, kelly > 0 ? kelly * 2.5 : 0.25);
+    for (const a of opts.concat(selected))
+      xMax = Math.max(xMax, Math.min(a / e.before, cap) * 1.08);
+    if (x0 !== null) xMax = Math.max(xMax, x0 * 1.12);
+    xMax = Math.min(xMax, cap);
+
+    const W = 248,
+      H = 132,
+      padL = 10,
+      padR = 14,
+      padT = 18,
+      padB = 18;
+    const N = 60;
+    let yMin = 0,
+      yMax = 1e-9;
+    const pts = [];
+    for (let i = 0; i <= N; i++) {
+      const x = (i / N) * xMax;
+      const y = r(x);
+      pts.push([x, y]);
+      yMin = Math.min(yMin, y);
+      yMax = Math.max(yMax, y);
+    }
+    const X = (x) => padL + (x / xMax) * (W - padL - padR);
+    const Y = (y) =>
+      padT + (1 - (y - yMin) / (yMax - yMin)) * (H - padT - padB);
+    const seg = (list) =>
+      list
+        .map(
+          ([x, y], i) => (i ? "L" : "M") + X(x).toFixed(1) + "," + Y(y).toFixed(1),
+        )
+        .join("");
+
+    let body =
+      '<line x1="' +
+      padL +
+      '" x2="' +
+      (W - padR) +
+      '" y1="' +
+      Y(0).toFixed(1) +
+      '" y2="' +
+      Y(0).toFixed(1) +
+      '" stroke="var(--baseline)" stroke-width="1"/>';
+
+    // accent while compounding, red past the intercept — same as the calculator
+    const stroke = (d, color) =>
+      '<path d="' +
+      d +
+      '" fill="none" stroke="' +
+      color +
+      '" stroke-width="1.5"/>';
+    if (kelly <= 0) {
+      body += stroke(seg(pts), "var(--bad)");
+    } else {
+      const beforeX0 = pts.filter(([x]) => x0 === null || x <= x0);
+      if (x0 !== null) beforeX0.push([x0, 0]);
+      body += stroke(seg(beforeX0), "var(--accent)");
+      if (x0 !== null)
+        body += stroke(
+          seg([[x0, 0]].concat(pts.filter(([x]) => x > x0))),
+          "var(--bad)",
+        );
+    }
+
+    // the optimal fraction is a green line through the plot; its label sits
+    // at the foot of the line, out of the dots' label bands
+    if (kelly > 0 && kelly <= xMax) {
+      const kx = X(kelly).toFixed(1);
+      body +=
+        '<line x1="' +
+        kx +
+        '" x2="' +
+        kx +
+        '" y1="' +
+        (padT - 6) +
+        '" y2="' +
+        (H - padB) +
+        '" stroke="var(--good)" stroke-width="1"/>' +
+        '<text x="' +
+        kx +
+        '" y="' +
+        (H - 5) +
+        '" text-anchor="middle" font-size="9" fill="var(--good)">optimal</text>';
+    }
+
+    // markers, gathered first so labels can dodge each other — the small
+    // options cluster near x = 0 and would otherwise overprint
+    const marks = [];
+    marks.push({ x: 0, y: 0, text: "pass", amount: 0 });
+    for (let i = 0; i < opts.length; i++) {
+      const f = Math.min(opts[i] / e.before, cap);
+      marks.push({ x: f, y: r(f), text: String(i + 1), amount: opts[i] });
+    }
+    // a slider bet isn't on the menu — mark it as its own point
+    if (selected > 0 && !opts.includes(selected)) {
+      const f = Math.min(selected / e.before, cap);
+      marks.push({ x: f, y: r(f), text: "you", amount: selected });
+    }
+    if (x0 !== null && x0 <= xMax)
+      marks.push({
+        x: x0,
+        y: 0,
+        text: (x0 * 100).toFixed(0) + "%",
+        amount: null,
+        color: "var(--bad)",
+      });
+
+    marks.sort((m1, m2) => m1.x - m2.x);
+    // three label tiers around the dot; left to right, each label takes the
+    // first tier it fits into
+    const tiers = [-8, 14, -18];
+    const lastRight = tiers.map(() => -Infinity);
+    for (const m of marks) {
+      const cx = X(m.x),
+        cy = Y(m.y);
+      const color =
+        m.color || (m.amount === selected ? "var(--accent)" : "var(--muted)");
+      if (m.amount !== null && m.amount === nearest)
+        body +=
+          '<circle cx="' +
+          cx.toFixed(1) +
+          '" cy="' +
+          cy.toFixed(1) +
+          '" r="5.4" fill="none" stroke="var(--accent)" stroke-width="1.3"/>';
+      body +=
+        '<circle cx="' +
+        cx.toFixed(1) +
+        '" cy="' +
+        cy.toFixed(1) +
+        '" r="3" fill="' +
+        color +
+        '" stroke="var(--surface)" stroke-width="1.2"/>';
+      const half = (m.text.length * 5.5) / 2;
+      const lx = Math.min(Math.max(cx, padL + half), W - padR + 8 - half);
+      let tier = 0;
+      for (let t = 0; t < tiers.length; t++) {
+        tier = t;
+        if (lx - half > lastRight[t] + 3) break;
+      }
+      lastRight[tier] = lx + half;
+      const ly = Math.min(Math.max(cy + tiers[tier], 8), H - 3);
+      body +=
+        '<text x="' +
+        lx.toFixed(1) +
+        '" y="' +
+        ly.toFixed(1) +
+        '" text-anchor="middle" font-size="9" fill="' +
+        color +
+        '">' +
+        m.text +
+        "</text>";
+    }
+
+    const probs =
+      "win " +
+      probStr(p) +
+      " · lose " +
+      probStr(q) +
+      (e.push > 0.0005 ? " · push " + probStr(e.push) : "");
+    return (
+      tipHtml(
+        oddsMain(b) +
+          " " +
+          (ODDS_NAMES[state.settings.odds] || state.settings.odds) +
+          " odds",
+        [probs],
+      ) +
+      '<svg width="' +
+      W +
+      '" height="' +
+      H +
+      '" viewBox="0 0 ' +
+      W +
+      " " +
+      H +
+      '" style="display:block;margin-top:4px">' +
+      body +
+      "</svg>"
+    );
+  }
+
+  // one tooltip per data row; `entries` is aligned to the tbody's row order,
+  // with null for the opening-balance row
+  function bindLedgerTips(tableId, entries) {
+    $(tableId)
+      .querySelectorAll("tbody tr")
+      .forEach((tr, i) => {
+        const e = entries[i];
+        if (e) bindTip(tr, () => rowTipHtml(e));
+      });
   }
 
   // One row per round: the full five-chip menu on wide tables; narrow
@@ -364,34 +583,37 @@
   // candidate to 0.9× Kelly, pass included, ties to the lower wager (.alt).
   // With coaching the overall closest candidate gets the outline (.best).
   // Chip count never depends on coaching, so toggling it never reflows.
+  function rowOpts(e) {
+    return Array.isArray(e.choices) ? e.choices : e.bet > 0 ? [e.bet] : [];
+  }
+
+  // candidate 0 stands for pass (0× Kelly); with no edge, pass is
+  // distance zero and bets rank by size
+  function candDist(e, a) {
+    if (e.kelly > 0)
+      return Math.abs((a === 0 ? 0 : a / (e.before * e.kelly)) - 0.9);
+    return a === 0 ? 0 : 1e9 + a;
+  }
+
+  // closest candidate to 0.9× Kelly, pass included, ties to the lower wager —
+  // the chip outline and the row tooltip agree on what "nearest" means
+  function pickCand(e, excl) {
+    let m = null;
+    for (const a of rowOpts(e)
+      .concat(0)
+      .slice()
+      .sort((x, y) => x - y)) {
+      if (excl !== null && a === excl) continue;
+      if (m === null || candDist(e, a) < candDist(e, m)) m = a;
+    }
+    return m;
+  }
+
   function ledgerRow(e, coaching) {
-    const opts = Array.isArray(e.choices)
-      ? e.choices
-      : e.bet > 0
-        ? [e.bet]
-        : [];
-    const kOf = (a) => a / (e.before * e.kelly);
-    // candidate 0 stands for pass (0× Kelly); with no edge, pass is
-    // distance zero and bets rank by size
-    const dist = (a) => {
-      if (e.kelly > 0) return Math.abs((a === 0 ? 0 : kOf(a)) - 0.9);
-      return a === 0 ? 0 : 1e9 + a;
-    };
-    const cands = opts.concat(0);
-    const pick = (excl) => {
-      let m = null;
-      for (const a of cands.slice().sort((x, y) => x - y)) {
-        if (excl !== null && a === excl) continue;
-        if (m === null || dist(a) < dist(m)) m = a;
-      }
-      return m;
-    };
+    const opts = rowOpts(e);
     const selected = e.bet > 0 ? e.bet : 0;
-    const best = pick(null);
-    const alt = pick(selected);
-    const title = (a) =>
-      e.kelly > 0 ? multStr(kOf(a)) + " Kelly" : "negative edge";
-    const passTitle = e.kelly <= 0 ? "correct — no edge" : "0× Kelly";
+    const best = pickCand(e, null);
+    const alt = pickCand(e, selected);
     const clsFor = (a) =>
       [
         a === selected ? "sel" : "",
@@ -400,27 +622,27 @@
       ]
         .filter(Boolean)
         .join(" ");
+    // no native title attributes here — the row's hover tooltip carries the
+    // odds, probabilities, and the growth curve, and the two would collide
     let chips = "";
-    for (const a of opts) chips += chip(money(a), clsFor(a), title(a));
-    chips += chip("pass", clsFor(0), passTitle);
+    for (const a of opts) chips += chip(money(a), clsFor(a));
+    chips += chip("pass", clsFor(0));
 
     // expected return per $1 staked — a push hands the stake back, so the
     // binary form covers ternary rounds too. Negative edges read red: the
     // trap rounds are exactly what this column is for.
+    // Decimal odds pair with fixed-width decimals (the point aligns down the
+    // column); every other format rounds to the nearest percent.
     const ev = e.p * e.b - e.q;
+    const dec = state.settings.odds === "decimal";
+    const evStr = dec
+      ? (ev < 0 ? "−" : "+") + Math.abs(ev).toFixed(3)
+      : (ev < 0 ? "−" : "+") + Math.round(Math.abs(ev) * 100) + "%";
+    const riskStr = dec ? e.q.toFixed(3) : Math.round(e.q * 100) + "%";
     const cells = [
       "<td>" + e.n + "</td>",
-      '<td class="' +
-        (ev < 0 ? "lose" : "dim") +
-        '" title="' +
-        oddsMain(e.b) +
-        " · 1× " +
-        (e.kelly > 0 ? money(e.kelly * e.before) : "pass") +
-        '">' +
-        (ev < 0 ? "−" : "+") +
-        pct(Math.abs(ev)) +
-        "</td>",
-      '<td class="dim">' + probStr(e.q) + "</td>",
+      '<td class="' + (ev < 0 ? "lose" : "dim") + '">' + evStr + "</td>",
+      '<td class="dim">' + riskStr + "</td>",
       '<td class="opts">' + chips + "</td>",
       "<td>" + (coaching ? scoreStr(scoreOf(e)) : "") + "</td>",
     ];
@@ -466,6 +688,9 @@
     $("ledger-game").querySelector("thead").innerHTML = ledgerHead(coaching);
     $("ledger-game").querySelector("tbody").innerHTML =
       rows.map((e) => ledgerRow(e, coaching)).join("") + zeroRow();
+    // mid-game, the curve tooltip is a coaching feature — it reveals the
+    // optimal fraction and the traps
+    if (coaching) bindLedgerTips("ledger-game", rows);
   }
 
   function renderGame() {
@@ -1530,6 +1755,7 @@
     $("history-table").querySelector("tbody").innerHTML =
       zeroRow() +
       state.game.history.map((e) => ledgerRow(e, coaching)).join("");
+    bindLedgerTips("history-table", [null].concat(state.game.history));
   }
 
   const EXPORT_HEADER = [
