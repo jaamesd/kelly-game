@@ -47,13 +47,9 @@
     return (Number.isInteger(v) ? v : v.toFixed(1)) + "%";
   }
 
-  // the decimal family (decimal odds, advantage) pairs with decimal
-  // probabilities; every other format keeps %
+  // decimal odds pair with decimal probabilities; every other format keeps %
   function probStr(p) {
-    if (
-      state.settings.odds === "decimal" ||
-      state.settings.odds === "advantage"
-    ) {
+    if (state.settings.odds === "decimal") {
       let s = (Math.round(p * 1000) / 1000).toFixed(3);
       if (s.endsWith("0")) s = s.slice(0, -1);
       return s;
@@ -75,8 +71,7 @@
     reveal: false,
   };
 
-  // The common bookmaker conventions for the same net odds b — plus
-  // "advantage", which shows the bettor's edge (EV per $1 staked) instead.
+  // The common bookmaker conventions for the same net odds b.
   const ODDS_NAMES = {
     decimal: "decimal",
     fractional: "fractional",
@@ -85,24 +80,17 @@
     hongkong: "hong kong",
     indonesian: "indonesian",
     malay: "malay",
-    advantage: "advantage",
   };
 
-  // the hero figure's label: conventions are "<name> odds", advantage is
-  // its own noun
   function fmtLabel(fmt) {
     const f = fmt || state.settings.odds;
-    return f === "advantage" ? "advantage" : (ODDS_NAMES[f] || f) + " odds";
+    return (ODDS_NAMES[f] || f) + " odds";
   }
 
   const trimNum = (x) => String(Math.round(x * 100) / 100);
 
-  function oddsMain(b, fmtOverride, p, q) {
+  function oddsMain(b, fmtOverride) {
     const fmt = fmtOverride || state.settings.odds;
-    // expected gross return per $1 staked — decimal odds' sibling: decimal
-    // odds are the multiple if you win, advantage is the multiple you
-    // expect. 1.08× is an 8% edge; below 1× the round is a trap.
-    if (fmt === "advantage") return (1 + (p * b - q)).toFixed(2) + "×";
     if (fmt === "fractional") {
       const [n, d] = K.toFraction(b);
       return n + "/" + d;
@@ -122,16 +110,9 @@
 
   // Terse, in the chosen convention's own vocabulary, always leading
   // with the win chance.
-  function oddsHint(b, p, q) {
+  function oddsHint(b, p) {
     const fmt = state.settings.odds;
     const chance = pct(p) + " chance of winning ";
-    if (fmt === "advantage")
-      return (
-        probStr(p) +
-        " chance of winning · " +
-        (1 + (p * b - q)).toFixed(2) +
-        "× wagered back in expectation"
-      );
     if (fmt === "fractional") {
       const [n, d] = K.toFraction(b);
       return chance + n + " per " + d + " staked";
@@ -199,6 +180,7 @@
         !["auto", "easy", "medium", "hard"].includes(state.settings.challenge)
       )
         state.settings.challenge = "auto";
+      if (!ODDS_NAMES[state.settings.odds]) state.settings.odds = "decimal";
     } catch (e) {
       /* corrupted save — start fresh */
     }
@@ -622,7 +604,7 @@
       probStr(q) +
       (e.push > 0.0005 ? " · push " + probStr(e.push) : "");
     return (
-      tipHtml(oddsMain(b, null, p, q) + " " + fmtLabel(), [probs]) +
+      tipHtml(oddsMain(b) + " " + fmtLabel(), [probs]) +
       '<svg width="' +
       W +
       '" height="' +
@@ -752,12 +734,10 @@
     // expected return per $1 staked — a push hands the stake back, so the
     // binary form covers ternary rounds too. Negative edges read red: the
     // trap rounds are exactly what this column is for.
-    // The decimal family pairs with fixed-width decimals (the point aligns
-    // down the column); every other format rounds to the nearest percent.
+    // Decimal odds pair with fixed-width decimals (the point aligns down the
+    // column); every other format rounds to the nearest percent.
     const ev = e.p * e.b - e.q;
-    const dec =
-      state.settings.odds === "decimal" ||
-      state.settings.odds === "advantage";
+    const dec = state.settings.odds === "decimal";
     const evStr = dec
       ? (ev < 0 ? "−" : "+") + Math.abs(ev).toFixed(3)
       : (ev < 0 ? "−" : "+") + Math.round(Math.abs(ev) * 100) + "%";
@@ -838,14 +818,24 @@
     if (!cur) return;
     const r = cur.round;
     $("round-label").textContent = roundNo() + "/" + g.maxRounds;
-    $("odds-line").textContent = oddsMain(r.b, null, r.p, r.q);
+    $("odds-line").textContent = oddsMain(r.b);
     $("odds-label").textContent = fmtLabel();
     $("win-num").textContent = probStr(r.p);
     $("lose-num").textContent = probStr(r.q);
     $("push-num").classList.toggle("hidden", !r.advanced);
     $("push-label").classList.toggle("hidden", !r.advanced);
     if (r.advanced) $("push-num").textContent = probStr(r.push);
-    $("payout-hint").textContent = oddsHint(r.b, r.p, r.q);
+    // with coaching, the proposition line carries its own verdict — the
+    // expected gross return in decimal, the edge in percent elsewhere
+    let hint = oddsHint(r.b, r.p);
+    if (state.settings.reveal) {
+      const edge = r.p * r.b - r.q;
+      hint +=
+        state.settings.odds === "decimal"
+          ? ", " + (1 + edge).toFixed(3) + " EV"
+          : ", " + (edge < 0 ? "−" : "") + pct(Math.abs(edge)) + " advantage";
+    }
+    $("payout-hint").textContent = hint;
     // deliberate mid-round peek: hover the odds to see the Kelly bet
     $("odds-line").title =
       "1× " + (r.kelly > 0 ? money(r.kelly * g.bankroll) : "pass");
@@ -1978,16 +1968,8 @@
   }
 
   // typed odds accept the current convention, plus a/b fractions and ±american
-  function parseOddsInput(str, fmt, p, q) {
+  function parseOddsInput(str, fmt) {
     str = String(str).trim().replace("−", "-");
-    if (fmt === "advantage") {
-      // an advantage plus the win/lose chances pins the odds: b = (adv+q)/p.
-      // "1.08" and "1.08×" are gross multiples; "8%" is an edge.
-      const v = Number(str.replace("%", "").replace(/[×x]/g, ""));
-      if (!Number.isFinite(v) || !(p > 0)) return null;
-      const adv = str.includes("%") ? v / 100 : v - 1;
-      return (adv + q) / p;
-    }
     let m = str.match(/^([+-])(\d+(?:\.\d+)?)$/);
     if (m && fmt === "american") {
       const a = Number(m[1] + m[2]);
@@ -2018,12 +2000,10 @@
       );
     }
     const fmt = calcOddsFormat();
-    // the decimal family pairs with decimal probabilities, same as the board
+    // decimal odds pair with decimal probabilities, same as the game board
     const probOut = (v) =>
-      fmt === "decimal" || fmt === "advantage"
-        ? v.toFixed(2)
-        : Math.round(v * 100) + "%";
-    $("calc-b-out").value = oddsMain(b, fmt, p, q);
+      fmt === "decimal" ? v.toFixed(2) : Math.round(v * 100) + "%";
+    $("calc-b-out").value = oddsMain(b, fmt);
     $("calc-p-out").value = probOut(p);
     $("calc-q-out").value = probOut(q);
     $("calc-r-out").value = probOut(rr);
@@ -2459,12 +2439,7 @@
     probTyped("q", $("calc-q-out"));
     probTyped("r", $("calc-r-out"));
     $("calc-b-out").addEventListener("change", () => {
-      const bTyped = parseOddsInput(
-        $("calc-b-out").value,
-        calcOddsFormat(),
-        Math.min(100, Math.max(0, Number($("calc-p").value) || 0)) / 100,
-        Math.min(100, Math.max(0, Number($("calc-q").value) || 0)) / 100,
-      );
+      const bTyped = parseOddsInput($("calc-b-out").value, calcOddsFormat());
       if (bTyped !== null)
         $("calc-b").value = Math.min(
           2100,
