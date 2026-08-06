@@ -500,11 +500,12 @@
         y,
         text,
         amount: a,
-        // fills take the dark infill blue; labels and lines keep the light one
+        // one color per mark, like green/red/grey: the pick's dot, line,
+        // and label all wear the infill blue
         fill: a === selected ? "var(--accent-fill)" : "var(--muted)",
         color:
           a === selected
-            ? "var(--accent)"
+            ? "var(--accent-fill)"
             : a === nearest
               ? "var(--good)"
               : "var(--muted)",
