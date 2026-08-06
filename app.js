@@ -553,9 +553,11 @@
     if (kelly <= 0) {
       body += stroke(seg(pts), "var(--bad)");
     } else {
+      // the curve carries the same blue as the pick's dot — every dot in
+      // this plot sits on a line of its own color
       const beforeX0 = pts.filter(([x]) => x0 === null || x <= x0);
       if (x0 !== null) beforeX0.push([x0, 0]);
-      body += stroke(seg(beforeX0), "var(--accent)");
+      body += stroke(seg(beforeX0), "var(--accent-fill)");
       if (x0 !== null)
         body += stroke(
           seg([[x0, 0]].concat(pts.filter(([x]) => x > x0))),
