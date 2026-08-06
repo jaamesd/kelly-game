@@ -385,15 +385,6 @@
     #bankroll-pop.animate { animation: pop-fade 1.5s ease-out forwards; }
   }
 
-  .notice {
-    border-left: 2px solid var(--accent);
-    padding: 2px 0 2px 14px;
-    margin: 22px 0;
-    font-size: 13.5px;
-    color: var(--ink-2);
-  }
-  .notice b { color: var(--ink); }
-
   /* ---------- settings ---------- */
   .settings { display: grid; row-gap: 14px; font-size: 13.5px; }
   .setting {
@@ -802,10 +793,6 @@
     <span class="tagline">Kelly Bet Simulator</span>
     <button class="info-btn" id="info-open" aria-label="What is the Kelly criterion?">i</button>
   </header>
-
-  <div id="advanced-notice" class="notice hidden">
-    <b>Ternary rounds.</b> Win + lose &lt; 100% — the rest pushes, stake returned.
-  </div>
 
   <!-- ===================== game view ===================== -->
   <div id="game-view">

@@ -150,8 +150,7 @@
       maxRounds: ROUNDS_PER_GAME,
       history: [],
       phase: "playing", // "playing" | "ended"
-      endReason: null, // "bust" | "complete" | "cashout"
-      advNoticeRound: 0,
+      endReason: null, // "bust" | "complete" | "cashout" | "quad"
       cur: null, // { round, choices }
     };
   }
@@ -214,7 +213,6 @@
       round,
       choices: K.genChoices(round.kelly, g.bankroll, Math.random),
     };
-    if (mode.ternary && !g.advNoticeRound) g.advNoticeRound = roundNo();
   }
 
   /* ---------- game flow ---------- */
@@ -815,16 +813,6 @@
     $("mode-tag").textContent = tierName(roundMode(roundNo()));
     // the sole header action — inert until there is a game to end
     $("end-now").disabled = g.history.length === 0;
-
-    // advanced notice sticks around for a few rounds after it first triggers
-    $("advanced-notice").classList.toggle(
-      "hidden",
-      !(
-        g.advNoticeRound &&
-        roundNo() >= g.advNoticeRound &&
-        roundNo() < g.advNoticeRound + 3
-      ),
-    );
 
     if (!cur) return;
     const r = cur.round;
