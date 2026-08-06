@@ -704,15 +704,18 @@
     const selected = e.bet > 0 ? e.bet : 0;
     const best = pickCand(e, null);
     const alt = pickCand(e, selected);
-    // a negative-growth option loses money in expectation — an overbet past
-    // break-even, or any stake on a trap round. Coaching-gated, like .best.
+    // the smallest option that loses money in expectation wears the red
+    // outline — everything above it is past the same threshold, so one mark
+    // is enough. Coaching-gated, like .best.
     const gRow = (x) => e.p * Math.log(1 + x * e.b) + e.q * Math.log(1 - x);
-    const isNeg = (a) => a > 0 && gRow(Math.min(a / e.before, 0.999)) < 0;
+    const firstNeg = opts.find(
+      (a) => gRow(Math.min(a / e.before, 0.999)) < 0,
+    );
     const clsFor = (a) =>
       [
         a === selected ? "sel" : "",
         coaching && a === best ? "best" : "",
-        coaching && isNeg(a) ? "neg" : "",
+        coaching && a === firstNeg ? "neg" : "",
         a === alt ? "alt" : "",
       ]
         .filter(Boolean)
