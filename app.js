@@ -275,8 +275,7 @@
     genNext();
     // the final round's pop may have been cut short when the board hid —
     // returning to the board must not replay it
-    $("bankroll-pop").textContent = "";
-    $("bankroll-pop").className = "";
+    clearPop();
     save();
     render();
   }
@@ -284,22 +283,37 @@
   function newGame() {
     state.game = freshGame();
     genNext();
-    $("bankroll-pop").textContent = "";
-    $("bankroll-pop").className = "";
+    clearPop();
     save();
     render();
   }
 
   /* ---------- game rendering ---------- */
 
+  let flashTimer = 0;
   function flashBankroll(cls) {
     const el = $("bankroll");
+    // a still-pending timer from the previous flash would strip this one early
+    clearTimeout(flashTimer);
     el.classList.remove("flash-win", "flash-lose");
     if (cls) {
       void el.offsetWidth;
       el.classList.add(cls);
-      setTimeout(() => el.classList.remove(cls), 700);
+      flashTimer = setTimeout(() => el.classList.remove(cls), 700);
     }
+  }
+
+  // The pop is strictly one-shot: cleared by a timer that slightly outlives
+  // the 1.5s animation (see pop-rise in the stylesheet). Animation events
+  // can't do this job — a canceled animation's queued event would land just
+  // after a rapid next bet restarts the pop, and wipe the fresh one.
+  let popTimer = 0;
+  function clearPop() {
+    clearTimeout(popTimer);
+    popTimer = 0;
+    const pop = $("bankroll-pop");
+    pop.className = "";
+    pop.textContent = "";
   }
 
   // Big centered result pop: "+$180", "−$45", "push", "pass". The sign hangs
@@ -334,18 +348,10 @@
     pop.className = cls;
     void pop.offsetWidth;
     pop.classList.add("animate");
-  }
-
-  // once the pop has played — or was cut short by the board being hidden
-  // (ending a game mid-animation fires animationcancel) — remove it entirely.
-  // A lingering .animate would replay whenever the board is shown again
-  // (toggling the info page, Continue after a completed game).
-  for (const evName of ["animationend", "animationcancel"]) {
-    $("bankroll-pop").addEventListener(evName, () => {
-      const pop = $("bankroll-pop");
-      pop.className = "";
-      pop.textContent = "";
-    });
+    // a lingering .animate would replay whenever the board is hidden and
+    // shown again (info toggle, Continue) — the timer runs even while hidden
+    clearTimeout(popTimer);
+    popTimer = setTimeout(clearPop, 1700);
   }
 
   /* ---------- ledger (shared by game view and results) ---------- */
