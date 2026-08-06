@@ -391,12 +391,10 @@
     const nearest = pickCand(e, null);
     const x0 = breakEvenX(b, p, q, kelly);
 
-    // the domain must hold every marked point with a little headroom
-    let xMax = Math.max(0.1, kelly > 0 ? kelly * 2.5 : 0.25);
-    for (const a of opts.concat(selected))
-      xMax = Math.max(xMax, Math.min(a / e.before, cap) * 1.08);
-    if (x0 !== null) xMax = Math.max(xMax, x0 * 1.12);
-    xMax = Math.min(xMax, cap);
+    // the x axis is ALWAYS 0–100% of bankroll — never scaled to the round —
+    // so positions read the same in every row, on the slider, and in the
+    // bet-line
+    const xMax = cap;
 
     // plot area on top, a label band below it — every marked point drops a
     // vertical line into the band, where its label lives
@@ -407,16 +405,18 @@
       padT = 10,
       plotB = 104;
     const bandY = [116, 126, 136]; // label tiers, top row first
-    const N = 60;
-    let yMin = 0,
-      yMax = 1e-9;
+    // the y window hugs the peak: past break-even the curve plunges toward
+    // −100%, and autoscaling to that would flatten the region that matters.
+    // Anything below the window rides the bottom edge — off the chart.
+    const N = 120;
+    let yMax = 1e-9;
+    for (let i = 0; i <= N; i++) yMax = Math.max(yMax, r((i / N) * xMax));
+    const yMin = -Math.max(2 * yMax, 0.08);
+    const clampY = (y) => Math.max(yMin, y);
     const pts = [];
     for (let i = 0; i <= N; i++) {
       const x = (i / N) * xMax;
-      const y = r(x);
-      pts.push([x, y]);
-      yMin = Math.min(yMin, y);
-      yMax = Math.max(yMax, y);
+      pts.push([x, clampY(r(x))]);
     }
     const X = (x) => padL + (x / xMax) * (W - padL - padR);
     const Y = (y) => padT + (1 - (y - yMin) / (yMax - yMin)) * (plotB - padT);
@@ -493,21 +493,23 @@
               ? "var(--good)"
               : "var(--muted)",
       });
-    cand(0, 0, "pass", 0);
+    // pass sits at the left edge of a never-scaled axis — no label needed;
+    // options are 1–4 ascending, o = optimal, i = intercept
+    cand(0, 0, "", 0);
     for (let i = 0; i < opts.length; i++) {
       const f = Math.min(opts[i] / e.before, cap);
-      cand(f, r(f), String(i + 1), opts[i]);
+      cand(f, clampY(r(f)), String(i + 1), opts[i]);
     }
-    // a slider bet isn't on the menu — mark it as its own point
+    // a slider bet isn't on the menu — its blue fill is its identity
     if (selected > 0 && !opts.includes(selected)) {
       const f = Math.min(selected / e.before, cap);
-      cand(f, r(f), "you", selected);
+      cand(f, clampY(r(f)), "", selected);
     }
     if (x0 !== null && x0 <= xMax)
       marks.push({
         x: x0,
         y: 0,
-        text: (x0 * 100).toFixed(0) + "%",
+        text: "i",
         amount: null,
         color: "var(--bad)",
       });
@@ -515,7 +517,7 @@
       marks.push({
         x: kelly,
         y: r(kelly), // green dot on the curve's peak, plus the full line
-        text: "optimal",
+        text: "o",
         amount: null,
         color: "var(--good)",
       });
@@ -568,6 +570,7 @@
           (m.fill || m.color) +
           '" stroke="var(--surface)" stroke-width="1.2"/>';
       }
+      if (!m.text) continue; // unlabeled marks (pass, slider bets)
       const half = (m.text.length * 5.5) / 2;
       const lx = Math.min(Math.max(cx, padL + half), W - padR + 8 - half);
       let tier = 0;
@@ -632,8 +635,16 @@
   // candidate to 0.9× Kelly, pass included, ties to the lower wager (.alt).
   // With coaching the overall closest candidate gets the outline (.best).
   // Chip count never depends on coaching, so toggling it never reflows.
+  // menu options in ascending order — the ledger, the tooltip labels, and
+  // the buttons all read smallest → largest (genChoices returns descending;
+  // stored games may hold either, so sort at presentation)
   function rowOpts(e) {
-    return Array.isArray(e.choices) ? e.choices : e.bet > 0 ? [e.bet] : [];
+    const o = Array.isArray(e.choices)
+      ? e.choices.slice()
+      : e.bet > 0
+        ? [e.bet]
+        : [];
+    return o.sort((x, y) => x - y);
   }
 
   // The best option this round: the candidate (pass included) with the
@@ -693,22 +704,28 @@
     const selected = e.bet > 0 ? e.bet : 0;
     const best = pickCand(e, null);
     const alt = pickCand(e, selected);
+    // a negative-growth option loses money in expectation — an overbet past
+    // break-even, or any stake on a trap round. Coaching-gated, like .best.
+    const gRow = (x) => e.p * Math.log(1 + x * e.b) + e.q * Math.log(1 - x);
+    const isNeg = (a) => a > 0 && gRow(Math.min(a / e.before, 0.999)) < 0;
     const clsFor = (a) =>
       [
         a === selected ? "sel" : "",
         coaching && a === best ? "best" : "",
+        coaching && isNeg(a) ? "neg" : "",
         a === alt ? "alt" : "",
       ]
         .filter(Boolean)
         .join(" ");
     // no native title attributes here — the row's hover tooltip carries the
-    // odds, probabilities, and the growth curve, and the two would collide
+    // odds, probabilities, and the growth curve, and the two would collide.
+    // pass leads, stakes ascend — the row reads like the tooltip's axis.
     let chips = "";
     if (e.input === "slider") {
       chips = betLine(e, coaching);
     } else {
+      chips = chip("pass", clsFor(0));
       for (const a of opts) chips += chip(money(a), clsFor(a));
-      chips += chip("pass", clsFor(0));
     }
 
     // expected return per $1 staked — a push hands the stake back, so the
@@ -831,7 +848,9 @@
         btn.addEventListener("click", () => placeBet(amount));
         box.appendChild(btn);
       };
-      cur.choices.forEach((amount, i) => {
+      // smallest first — keys 1–4 map to stakes ascending, keypad-style
+      const ordered = cur.choices.slice().sort((a, b) => a - b);
+      ordered.forEach((amount, i) => {
         const fracPct = (amount / g.bankroll) * 100;
         addBet(
           amount,

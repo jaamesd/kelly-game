@@ -600,16 +600,20 @@
     margin: 1px 3px 1px 0;
     color: var(--ink-2);
   }
-  /* blue fill = the one you picked; green outline = the one you should have */
+  /* blue fill = the one you picked; green outline = the one you should
+     have; red outline = an option that loses money in expectation */
   .chip.sel { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   .chip.best { border: 2px solid var(--good); padding: 1px 0; color: var(--ink); }
-  .chip.sel.best {
+  .chip.neg { border: 2px solid var(--bad); padding: 1px 0; color: var(--ink); }
+  .chip.sel.best,
+  .chip.sel.neg {
     background: var(--accent);
     border: 1px solid var(--accent);
     padding: 2px 0;
     color: var(--accent-ink);
-    box-shadow: 0 0 0 1.5px var(--page), 0 0 0 3px var(--good);
   }
+  .chip.sel.best { box-shadow: 0 0 0 1.5px var(--page), 0 0 0 3px var(--good); }
+  .chip.sel.neg { box-shadow: 0 0 0 1.5px var(--page), 0 0 0 3px var(--bad); }
   .chip .mult { opacity: 0.65; font-size: 10px; }
   /* continuous bets: the slider in miniature instead of a chip menu.
      Grey line, blue dot = the bet; coaching adds green (optimal) and red
