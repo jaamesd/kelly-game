@@ -375,7 +375,7 @@
 
   // Row tooltip: the round's odds and probabilities over the calculator's
   // growth curve in miniature, with the actual menu marked on it.
-  // Grammar matches the chips: blue fill = the closest candidate to optimal,
+  // Grammar matches the chips: green ring = the best option this round,
   // blue ring = your pick, green line + dot = the optimal fraction, red dot
   // = the break-even intercept. Available with coaching on or on results.
   function rowTipHtml(e) {
@@ -485,9 +485,13 @@
         y,
         text,
         amount: a,
-        fill: a === nearest ? "var(--accent)" : "var(--muted)",
+        fill: "var(--muted)",
         color:
-          a === nearest || a === selected ? "var(--accent)" : "var(--muted)",
+          a === selected
+            ? "var(--accent)"
+            : a === nearest
+              ? "var(--good)"
+              : "var(--muted)",
       });
     cand(0, 0, "pass", 0);
     for (let i = 0; i < opts.length; i++) {
@@ -547,14 +551,22 @@
       const cx = X(m.x);
       if (m.y !== null) {
         const cy = Y(m.y);
-        // the outline ring marks what you picked
+        // rings: green = the best option, blue = your pick; both when they
+        // coincide, the blue one a step out
+        const ring = (rr, color) =>
+          '<circle cx="' +
+          cx.toFixed(1) +
+          '" cy="' +
+          cy.toFixed(1) +
+          '" r="' +
+          rr +
+          '" fill="none" stroke="' +
+          color +
+          '" stroke-width="1.3"/>';
+        const isBest = m.amount !== null && m.amount === nearest;
+        if (isBest) body += ring(5.4, "var(--good)");
         if (m.amount !== null && m.amount === selected)
-          body +=
-            '<circle cx="' +
-            cx.toFixed(1) +
-            '" cy="' +
-            cy.toFixed(1) +
-            '" r="5.4" fill="none" stroke="var(--accent)" stroke-width="1.3"/>';
+          body += ring(isBest ? 7.4 : 5.4, "var(--accent)");
         body +=
           '<circle cx="' +
           cx.toFixed(1) +
@@ -632,26 +644,32 @@
     return Array.isArray(e.choices) ? e.choices : e.bet > 0 ? [e.bet] : [];
   }
 
-  // candidate 0 stands for pass (0× Kelly); with no edge, pass is
-  // distance zero and bets rank by size
-  function candDist(e, a) {
-    if (e.kelly > 0)
-      return Math.abs((a === 0 ? 0 : a / (e.before * e.kelly)) - 0.9);
-    return a === 0 ? 0 : 1e9 + a;
-  }
-
-  // closest candidate to 0.9× Kelly, pass included, ties to the lower wager —
-  // the chip outline and the row tooltip agree on what "nearest" means
+  // The best option this round: the candidate (pass included) with the
+  // highest expected growth — but a bigger wager only displaces a smaller
+  // one by winning clearly, at least 10% of the optimal growth; near-equal
+  // growth prefers the lower stake. With no edge, pass wins and bets rank
+  // by size. The chip outline and the row tooltip agree on this pick.
   function pickCand(e, excl) {
-    let m = null;
+    const g = (x) => e.p * Math.log(1 + x * e.b) + e.q * Math.log(1 - x);
+    const margin = e.kelly > 0 ? 0.1 * g(e.kelly) : 0;
+    let best = null;
+    let bestG = 0;
     for (const a of rowOpts(e)
       .concat(0)
-      .slice()
       .sort((x, y) => x - y)) {
       if (excl !== null && a === excl) continue;
-      if (m === null || candDist(e, a) < candDist(e, m)) m = a;
+      const ga =
+        e.kelly > 0
+          ? g(Math.min(a / e.before, 0.999))
+          : a === 0
+            ? 0
+            : -(1e9 + a);
+      if (best === null || ga > bestG + margin) {
+        best = a;
+        bestG = ga;
+      }
     }
-    return m;
+    return best;
   }
 
   // A continuous bet has no menu to show — its Bet cell is the slider in

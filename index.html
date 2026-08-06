@@ -600,14 +600,11 @@
     margin: 1px 3px 1px 0;
     color: var(--ink-2);
   }
-  /* solid = the closest candidate to optimal; outline = what you picked */
-  .chip.best { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  /* green outline = the best option this round; blue outline = your pick */
+  .chip.best { border: 2px solid var(--good); padding: 1px 0; color: var(--ink); }
   .chip.sel { border: 2px solid var(--accent); padding: 1px 0; color: var(--ink); }
   .chip.sel.best {
-    background: var(--accent);
-    border: 1px solid var(--accent);
-    padding: 2px 0;
-    color: var(--accent-ink);
+    border: 2px solid var(--good);
     box-shadow: 0 0 0 1.5px var(--page), 0 0 0 3px var(--accent);
   }
   .chip .mult { opacity: 0.65; font-size: 10px; }
@@ -654,7 +651,7 @@
     th.c-k { width: 34px; }
     th.c-money { width: 60px; }
     .chip { width: 46px; font-size: 10px; margin: 1px 2px 1px 0; }
-    /* narrow: just the pick and the nearest other candidate to 0.9× Kelly */
+    /* narrow: just the pick and the nearest other candidate to optimal */
     .chip { display: none; }
     .chip.sel, .chip.alt { display: inline-flex; }
   }
