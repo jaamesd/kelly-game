@@ -837,13 +837,14 @@
     $("push-label").classList.toggle("hidden", !r.advanced);
     if (r.advanced) $("push-num").textContent = probStr(r.push);
     // with coaching, the proposition line carries its own verdict — the
-    // expected gross return in decimal, the edge in percent elsewhere
+    // edge in the same delta form as the history's EV column (decimal) or
+    // as a percent advantage elsewhere
     let hint = oddsHint(r.b, r.p);
     if (state.settings.reveal) {
       const edge = r.p * r.b - r.q;
       hint +=
         state.settings.odds === "decimal"
-          ? ", " + (1 + edge).toFixed(3) + " EV"
+          ? ", " + (edge < 0 ? "−" : "+") + Math.abs(edge).toFixed(3) + " EV"
           : ", " + (edge < 0 ? "−" : "") + pct(Math.abs(edge)) + " advantage";
     }
     $("payout-hint").textContent = hint;
@@ -1693,9 +1694,12 @@
     const zeroY = padT + upH;
     const scale = plotH / span;
 
+    // event-mode counts share one decimal precision down the whole axis —
+    // a fractional step must not render as a ragged 2 / 1.5 / 1 / 0.5
+    const stepUp = niceTickStep(maxUp, maxDown > 0 ? 2 : 4);
     const tickFmt = (v) =>
       histMode === "event"
-        ? String(v)
+        ? v.toFixed(stepUp < 1 ? 1 : 0)
         : histMode === "value"
           ? money(v)
           : (Math.expm1(v) * 100).toFixed(
@@ -1729,7 +1733,6 @@
       );
       t.textContent = (v < 0 ? "−" : "") + tickFmt(Math.abs(v));
     };
-    const stepUp = niceTickStep(maxUp, maxDown > 0 ? 2 : 4);
     for (let v = stepUp; v <= maxUp; v += stepUp)
       drawTick(v, zeroY - v * scale);
 
