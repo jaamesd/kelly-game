@@ -31,11 +31,15 @@
     --hairline: rgba(11, 11, 11, 0.12);
     --baseline: #c3c2b7;
     --surface: #fcfcfb;
-    --accent: #0b4ba8;
+    /* two blues, two roles: --accent is the line/text/outline blue (the
+       white/grey substitute); --accent-fill is the dark infill blue (the
+       black substitute) that white text sits on */
+    --accent: #1460b8;
+    --accent-fill: #0a3d8f;
     --accent-ink: #ffffff;
     --good: #006300;
     --bad: #d03b3b;
-    --wash: rgba(11, 75, 168, 0.08);
+    --wash: rgba(20, 96, 184, 0.08);
     /* resting fill on the betting controls — enough to read as a surface
        without competing with --wash, which belongs to hover */
     --fill: rgba(11, 11, 11, 0.035);
@@ -51,9 +55,10 @@
       --hairline: rgba(255, 255, 255, 0.14);
       --baseline: #383835;
       --surface: #1a1a19;
-      --accent: #2b6ccc;
+      --accent: #3c7fd0;
+      --accent-fill: #16418c;
       --good: #0ca30c;
-      --wash: rgba(43, 108, 204, 0.12);
+      --wash: rgba(60, 127, 208, 0.12);
       --fill: rgba(255, 255, 255, 0.055);
     }
   }
@@ -237,8 +242,8 @@
     color: var(--accent);
   }
   button.primary:hover {
-    background: var(--accent);
-    border-color: var(--accent);
+    background: var(--accent-fill);
+    border-color: var(--accent-fill);
     color: var(--accent-ink);
   }
   button.danger {
@@ -591,15 +596,15 @@
     margin: 1px 3px 1px 0;
     color: var(--ink-2);
   }
-  /* blue fill = the one you picked; green outline = the one you should
+  /* dark-blue fill = the one you picked; green outline = the one you should
      have; red outline = an option that loses money in expectation */
-  .chip.sel { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .chip.sel { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--accent-ink); }
   .chip.best { border: 2px solid var(--good); padding: 1px 0; color: var(--ink); }
   .chip.neg { border: 2px solid var(--bad); padding: 1px 0; color: var(--ink); }
   .chip.sel.best,
   .chip.sel.neg {
-    background: var(--accent);
-    border: 1px solid var(--accent);
+    background: var(--accent-fill);
+    border: 1px solid var(--accent-fill);
     padding: 2px 0;
     color: var(--accent-ink);
   }
@@ -637,7 +642,7 @@
   }
   .bl-dot.opt { background: var(--good); }
   .bl-dot.x0 { background: var(--bad); }
-  .bl-dot.bet { background: var(--accent); box-shadow: 0 0 0 1.5px var(--page); }
+  .bl-dot.bet { background: var(--accent-fill); box-shadow: 0 0 0 1.5px var(--page); }
   /* below this width the ledgers reflow to fit — nothing scrolls sideways */
   @media (max-width: 680px) {
     #ledger-game, #history-table { min-width: 0; font-size: 11px; }

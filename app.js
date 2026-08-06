@@ -500,7 +500,8 @@
         y,
         text,
         amount: a,
-        fill: a === selected ? "var(--accent)" : "var(--muted)",
+        // fills take the dark infill blue; labels and lines keep the light one
+        fill: a === selected ? "var(--accent-fill)" : "var(--muted)",
         color:
           a === selected
             ? "var(--accent)"
