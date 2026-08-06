@@ -47,9 +47,13 @@
     return (Number.isInteger(v) ? v : v.toFixed(1)) + "%";
   }
 
-  // decimal odds pair with decimal probabilities; every other format keeps %
+  // the decimal family (decimal odds, advantage) pairs with decimal
+  // probabilities; every other format keeps %
   function probStr(p) {
-    if (state.settings.odds === "decimal") {
+    if (
+      state.settings.odds === "decimal" ||
+      state.settings.odds === "advantage"
+    ) {
       let s = (Math.round(p * 1000) / 1000).toFixed(3);
       if (s.endsWith("0")) s = s.slice(0, -1);
       return s;
@@ -91,13 +95,14 @@
     return f === "advantage" ? "advantage" : (ODDS_NAMES[f] || f) + " odds";
   }
 
-  const advStr = (v) => (v < 0 ? "−" : "+") + pct(Math.abs(v));
-
   const trimNum = (x) => String(Math.round(x * 100) / 100);
 
   function oddsMain(b, fmtOverride, p, q) {
     const fmt = fmtOverride || state.settings.odds;
-    if (fmt === "advantage") return advStr(p * b - q);
+    // expected gross return per $1 staked — decimal odds' sibling: decimal
+    // odds are the multiple if you win, advantage is the multiple you
+    // expect. 1.08× is an 8% edge; below 1× the round is a trap.
+    if (fmt === "advantage") return (1 + (p * b - q)).toFixed(2) + "×";
     if (fmt === "fractional") {
       const [n, d] = K.toFraction(b);
       return n + "/" + d;
@@ -121,7 +126,12 @@
     const fmt = state.settings.odds;
     const chance = pct(p) + " chance of winning ";
     if (fmt === "advantage")
-      return advStr(p * b - q) + " expected return per $1 staked";
+      return (
+        probStr(p) +
+        " chance of winning · " +
+        (1 + (p * b - q)).toFixed(2) +
+        "× wagered back in expectation"
+      );
     if (fmt === "fractional") {
       const [n, d] = K.toFraction(b);
       return chance + n + " per " + d + " staked";
@@ -742,10 +752,12 @@
     // expected return per $1 staked — a push hands the stake back, so the
     // binary form covers ternary rounds too. Negative edges read red: the
     // trap rounds are exactly what this column is for.
-    // Decimal odds pair with fixed-width decimals (the point aligns down the
-    // column); every other format rounds to the nearest percent.
+    // The decimal family pairs with fixed-width decimals (the point aligns
+    // down the column); every other format rounds to the nearest percent.
     const ev = e.p * e.b - e.q;
-    const dec = state.settings.odds === "decimal";
+    const dec =
+      state.settings.odds === "decimal" ||
+      state.settings.odds === "advantage";
     const evStr = dec
       ? (ev < 0 ? "−" : "+") + Math.abs(ev).toFixed(3)
       : (ev < 0 ? "−" : "+") + Math.round(Math.abs(ev) * 100) + "%";
@@ -1969,11 +1981,12 @@
   function parseOddsInput(str, fmt, p, q) {
     str = String(str).trim().replace("−", "-");
     if (fmt === "advantage") {
-      // an advantage plus the win/lose chances pins the odds: b = (adv+q)/p
-      let v = Number(str.replace("%", ""));
+      // an advantage plus the win/lose chances pins the odds: b = (adv+q)/p.
+      // "1.08" and "1.08×" are gross multiples; "8%" is an edge.
+      const v = Number(str.replace("%", "").replace(/[×x]/g, ""));
       if (!Number.isFinite(v) || !(p > 0)) return null;
-      if (Math.abs(v) > 1) v /= 100; // "8.3" and "8.3%" both mean 8.3%
-      return (v + q) / p;
+      const adv = str.includes("%") ? v / 100 : v - 1;
+      return (adv + q) / p;
     }
     let m = str.match(/^([+-])(\d+(?:\.\d+)?)$/);
     if (m && fmt === "american") {
@@ -2005,9 +2018,11 @@
       );
     }
     const fmt = calcOddsFormat();
-    // decimal odds pair with decimal probabilities, same as the game board
+    // the decimal family pairs with decimal probabilities, same as the board
     const probOut = (v) =>
-      fmt === "decimal" ? v.toFixed(2) : Math.round(v * 100) + "%";
+      fmt === "decimal" || fmt === "advantage"
+        ? v.toFixed(2)
+        : Math.round(v * 100) + "%";
     $("calc-b-out").value = oddsMain(b, fmt, p, q);
     $("calc-p-out").value = probOut(p);
     $("calc-q-out").value = probOut(q);
