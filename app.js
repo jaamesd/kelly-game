@@ -375,9 +375,9 @@
 
   // Row tooltip: the round's odds and probabilities over the calculator's
   // growth curve in miniature, with the actual menu marked on it.
-  // Grammar matches the chips: green ring = the best option this round,
-  // blue ring = your pick, green line + dot = the optimal fraction, red dot
-  // = the break-even intercept. Available with coaching on or on results.
+  // Grammar matches the chips: blue fill = your pick, green ring = the best
+  // option this round, green line + dot = the optimal fraction, red dot =
+  // the break-even intercept. Available with coaching on or on results.
   function rowTipHtml(e) {
     const b = e.b,
       p = e.p,
@@ -485,7 +485,7 @@
         y,
         text,
         amount: a,
-        fill: "var(--muted)",
+        fill: a === selected ? "var(--accent)" : "var(--muted)",
         color:
           a === selected
             ? "var(--accent)"
@@ -551,22 +551,14 @@
       const cx = X(m.x);
       if (m.y !== null) {
         const cy = Y(m.y);
-        // rings: green = the best option, blue = your pick; both when they
-        // coincide, the blue one a step out
-        const ring = (rr, color) =>
-          '<circle cx="' +
-          cx.toFixed(1) +
-          '" cy="' +
-          cy.toFixed(1) +
-          '" r="' +
-          rr +
-          '" fill="none" stroke="' +
-          color +
-          '" stroke-width="1.3"/>';
-        const isBest = m.amount !== null && m.amount === nearest;
-        if (isBest) body += ring(5.4, "var(--good)");
-        if (m.amount !== null && m.amount === selected)
-          body += ring(isBest ? 7.4 : 5.4, "var(--accent)");
+        // green ring marks the best option; your pick is the filled dot
+        if (m.amount !== null && m.amount === nearest)
+          body +=
+            '<circle cx="' +
+            cx.toFixed(1) +
+            '" cy="' +
+            cy.toFixed(1) +
+            '" r="5.4" fill="none" stroke="var(--good)" stroke-width="1.3"/>';
         body +=
           '<circle cx="' +
           cx.toFixed(1) +
