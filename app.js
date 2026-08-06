@@ -7,6 +7,8 @@
   const START_BANKROLL = 1000;
   const ROUNDS_PER_GAME = 99;
   const ADVANCED_AFTER = 50;
+  // reaching $1Q ends the game — you've beaten it
+  const MAX_BANKROLL = 1e15;
 
   const $ = (id) => document.getElementById(id);
 
@@ -18,6 +20,7 @@
     const sign = v < 0 ? "−" : "";
     const abs = Math.abs(v);
     for (const [div, suf] of [
+      [1e15, "Q"],
       [1e12, "T"],
       [1e9, "B"],
       [1e6, "M"],
@@ -249,6 +252,8 @@
 
     if (after < 1) {
       endGame("bust");
+    } else if (after >= MAX_BANKROLL) {
+      endGame("quad"); // $1Q — the game is beaten, no Continue offered
     } else if (g.history.length >= g.maxRounds) {
       endGame("complete");
     } else {
