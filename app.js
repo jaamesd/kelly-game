@@ -753,7 +753,11 @@
     const riskStr = dec ? e.q.toFixed(3) : Math.round(e.q * 100) + "%";
     const cells = [
       "<td>" + e.n + "</td>",
-      '<td class="' + (ev < 0 ? "lose" : "dim") + '">' + evStr + "</td>",
+      '<td class="' +
+        (ev < 0 ? "lose" : ev > 0 ? "win" : "dim") +
+        '">' +
+        evStr +
+        "</td>",
       '<td class="dim">' + riskStr + "</td>",
       '<td class="opts">' + chips + "</td>",
       "<td>" + (coaching ? scoreStr(scoreOf(e)) : "") + "</td>",
